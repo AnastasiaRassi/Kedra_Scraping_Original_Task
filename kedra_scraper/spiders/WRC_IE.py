@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from io import BytesIO
 from typing import Iterator
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import urlsplit
 
 import scrapy
 from pypdf import PdfReader
@@ -17,12 +17,24 @@ class WRC_IE_Spider(scrapy.Spider):
     search_url = "https://www.workplacerelations.ie/en/search/"
     source = "https://www.workplacerelations.ie"
 
-    # Values used by the WRC search form's Body filter.
+    # ASP.NET checkbox field names and values used by the Body filter.
     body_categories = {
-        "Employment Appeals Tribunal": "2",
-        "Equality Tribunal": "1",
-        "Labour Court": "3",
-        "Workplace Relations Commission": "15376",
+        "Employment Appeals Tribunal": (
+            "ctl00$ContentPlaceHolder_Main$CB2$CB2_0",
+            "2",
+        ),
+        "Equality Tribunal": (
+            "ctl00$ContentPlaceHolder_Main$CB2$CB2_1",
+            "1",
+        ),
+        "Labour Court": (
+            "ctl00$ContentPlaceHolder_Main$CB2$CB2_2",
+            "3",
+        ),
+        "Workplace Relations Commission": (
+            "ctl00$ContentPlaceHolder_Main$CB2$CB2_3",
+            "15376",
+        ),
     }
 
     def __init__(
@@ -48,26 +60,36 @@ class WRC_IE_Spider(scrapy.Spider):
             raise ValueError("start_date must be earlier than or equal to end_date")
 
     async def start(self):
-        """Create one search request for every month and Body category."""
+        """Load the ASP.NET search form before submitting its partitions."""
+        yield scrapy.Request(
+            url=f"{self.search_url}?advance=true&decisions=1",
+            callback=self.start_partition_searches,
+        )
+
+    def start_partition_searches(self, response):
+        """Submit one POST search for every month and Body category."""
         for partition_start, partition_end in self._monthly_partitions(
             self.start_date,
             self.end_date,
         ):
             partition_date = partition_start.isoformat()
 
-            for category, body_id in self.body_categories.items():
-                query = urlencode(
-                    {
-                        "advance": "true",
-                        "decisions": "1",
-                        "body": body_id,
-                        "from": partition_start.strftime("%d/%m/%Y"),
-                        "to": partition_end.strftime("%d/%m/%Y"),
-                    }
-                )
+            for category, (body_field, body_value) in self.body_categories.items():
+                form_data = {
+                    "ctl00$ContentPlaceHolder_Main$TextBox2": (
+                        partition_start.strftime("%d/%m/%Y")
+                    ),
+                    "ctl00$ContentPlaceHolder_Main$TextBox3": (
+                        partition_end.strftime("%d/%m/%Y")
+                    ),
+                    body_field: body_value,
+                    "ctl00$ContentPlaceHolder_Main$refine_btn": "",
+                }
 
-                yield scrapy.Request(
-                    url=f"{self.search_url}?{query}",
+                yield scrapy.FormRequest.from_response(
+                    response,
+                    formxpath="(//form)[1]",
+                    formdata=form_data,
                     callback=self.parse,
                     cb_kwargs={
                         "category": category,
