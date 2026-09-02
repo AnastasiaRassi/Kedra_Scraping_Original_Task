@@ -6,8 +6,13 @@
 from dataclasses import dataclass
 
 
+
 @dataclass
 class KedraScraperItem:
-    # define the fields for your item here like:
-    # name: str | None = None
-    pass
+    title: str 
+    published_date: str
+    partition_date: str 
+    url: str
+    content: str | None = None
+    description: str | None = None
+    identifiers: str | None = None
