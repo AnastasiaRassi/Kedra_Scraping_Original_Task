@@ -9,13 +9,13 @@ from typing import Literal
 
 @dataclass
 class KedraScraperItem:
-    title: str 
+    title: str
     published_date: str
-    partition_date: str 
+    partition_date: str
     content: str
-    identifier: str 
-    doc_url: str | None = None
+    identifier: str
     source: str
     category: str
     source_format: Literal["html", "pdf"]
+    doc_url: str | None = None
     description: str | None = None
