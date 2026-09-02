@@ -140,12 +140,10 @@ class WRC_IE_Spider(scrapy.Spider):
                     "description": description,
                 },
             )
-
         next_page = response.css(
-            "nav.pages a.next::attr(href), "
-            "ul.pagination a.next::attr(href), "
-            "a.next::attr(href)"
+            "nav.pages li.current + li a::attr(href)"
         ).get()
+
 
         if next_page:
             yield response.follow(
