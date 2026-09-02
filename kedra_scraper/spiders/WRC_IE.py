@@ -110,7 +110,9 @@ class WRC_IE_Spider(scrapy.Spider):
             published_date = self._normalise_published_date(
                 self._selector_text(card.css(".date"))
             )
-            description = self._selector_text(card.css("p.description")) or None
+            # WRC calls this element "description", but it is the case name.
+            title = self._selector_text(card.css("p.description")) or identifier
+            description = None
 
             if not document_href or not identifier or not published_date:
                 self.logger.warning(
@@ -130,6 +132,7 @@ class WRC_IE_Spider(scrapy.Spider):
                 url=document_url,
                 callback=callback,
                 cb_kwargs={
+                    "title": title,
                     "identifier": identifier,
                     "published_date": published_date,
                     "partition_date": partition_date,
@@ -157,6 +160,7 @@ class WRC_IE_Spider(scrapy.Spider):
     def parse_document(
         self,
         response,
+        title: str,
         identifier: str,
         published_date: str,
         partition_date: str,
@@ -168,6 +172,7 @@ class WRC_IE_Spider(scrapy.Spider):
         if b"application/pdf" in content_type or self._is_pdf_url(response.url):
             yield from self.parse_pdf(
                 response,
+                title=title,
                 identifier=identifier,
                 published_date=published_date,
                 partition_date=partition_date,
@@ -195,6 +200,7 @@ class WRC_IE_Spider(scrapy.Spider):
                     pdf_href,
                     callback=self.parse_pdf,
                     cb_kwargs={
+                        "title": title,
                         "identifier": identifier,
                         "published_date": published_date,
                         "partition_date": partition_date,
@@ -205,11 +211,6 @@ class WRC_IE_Spider(scrapy.Spider):
                 return
 
             self.logger.warning("No document content found at %s", response.url)
-
-        document_heading = self._clean_text(
-            content_node.css("h1, h2, h3").xpath("string(.)").get()
-        )
-        title = document_heading or description or identifier
 
         yield KedraScraperItem(
             title=title,
@@ -227,14 +228,14 @@ class WRC_IE_Spider(scrapy.Spider):
     def parse_pdf(
         self,
         response,
+        title: str,
         identifier: str,
         published_date: str,
         partition_date: str,
         category: str,
         description: str | None,
     ):
-        """Extract text and metadata from a PDF document."""
-        pdf_title = ""
+        """Extract text from a PDF document."""
         content = ""
 
         try:
@@ -244,11 +245,6 @@ class WRC_IE_Spider(scrapy.Spider):
                 for page in reader.pages
                 if (text := (page.extract_text() or "").strip())
             )
-
-            if reader.metadata:
-                pdf_title = self._clean_text(
-                    getattr(reader.metadata, "title", None)
-                )
         except Exception as exc:
             self.logger.error("Could not read PDF %s: %s", response.url, exc)
 
@@ -259,7 +255,7 @@ class WRC_IE_Spider(scrapy.Spider):
             )
 
         yield KedraScraperItem(
-            title=pdf_title or description or identifier,
+            title=title,
             published_date=published_date,
             partition_date=partition_date,
             content=content,
