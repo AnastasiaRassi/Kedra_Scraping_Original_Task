@@ -184,8 +184,8 @@ class WRC_IE_Spider(scrapy.Spider):
 
             self.logger.warning("No document content found at %s", response.url)
 
-        document_heading = self._selector_text(
-            content_node.css("h1, h2, h3").xpath("string(.)")
+        document_heading = self._clean_text(
+            content_node.css("h1, h2, h3").xpath("string(.)").get()
         )
         title = document_heading or description or identifier
 
