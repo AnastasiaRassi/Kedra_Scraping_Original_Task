@@ -17,7 +17,7 @@ class WRC_IE_Spider(scrapy.Spider):
     search_url = "https://www.workplacerelations.ie/en/search/"
     source = "https://www.workplacerelations.ie"
 
-    # ASP.NET checkbox field names and values used by the Body filter.
+    # this'll be hardcoded for now & fixed later when we focus on reproducability
     body_categories = {
         "Employment Appeals Tribunal": (
             "ctl00$ContentPlaceHolder_Main$CB2$CB2_0",
@@ -53,8 +53,8 @@ class WRC_IE_Spider(scrapy.Spider):
                 "-a end_date=31-12-2024"
             )
 
-        self.start_date = self._parse_input_date(start_date, "start_date")
-        self.end_date = self._parse_input_date(end_date, "end_date")
+        self.start_date = self._parse_scraped_date(start_date, "start_date")
+        self.end_date = self._parse_scraped_date(end_date, "end_date")
 
         if self.start_date > self.end_date:
             raise ValueError("start_date must be earlier than or equal to end_date")
@@ -272,7 +272,7 @@ class WRC_IE_Spider(scrapy.Spider):
         )
 
     @staticmethod
-    def _parse_input_date(value: str, argument_name: str) -> date:
+    def _parse_scraped_date(value: str, argument_name: str) -> date:
         for date_format in ("%d-%m-%Y", "%Y-%m-%d"):
             try:
                 return datetime.strptime(value, date_format).date()

@@ -17,5 +17,5 @@ class KedraScraperItem:
     source: str
     category: str
     source_format: Literal["html", "pdf"]
-    doc_url: str | None = None
+    doc_url: str
     description: str | None = None
