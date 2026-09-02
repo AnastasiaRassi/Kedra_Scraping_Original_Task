@@ -16,3 +16,17 @@ class KedraScraperItem:
     content: str | None = None
     description: str | None = None
     identifiers: str | None = None
+    doc_url: str | None = None
+
+
+@dataclass
+class KedraScraperItem:
+    title: str 
+    published_date: str
+    partition_date: str 
+    url: str
+    content: str | None = None
+    description: str | None = None
+    identifiers: str | None = None
+    doc_url: str | None = None
+    file_hash: str| None = None

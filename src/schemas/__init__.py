@@ -1,1 +1,0 @@
-# here we define the valid schemas for expected outputs like NoSQL dictionaries with their metadata or required fields.
