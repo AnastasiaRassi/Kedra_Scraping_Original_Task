@@ -9,6 +9,9 @@ ADDONS = {}
 
 USER_AGENT = "KedraScraper/1.0"
 
+# Keep request summaries and warnings, but do not print every item's full content.
+LOG_LEVEL = "INFO"
+
 # Obey robots.txt rules
 ROBOTSTXT_OBEY = True
 
@@ -42,7 +45,7 @@ AUTOTHROTTLE_MAX_DELAY = 30
 # each remote server
 AUTOTHROTTLE_TARGET_CONCURRENCY = 2.0
 # Enable showing throttling stats for every response received:
-AUTOTHROTTLE_DEBUG = True
+AUTOTHROTTLE_DEBUG = False
 
 RETRY_TIMES = 3
 DOWNLOAD_TIMEOUT =30
