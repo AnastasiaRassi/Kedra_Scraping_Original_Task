@@ -189,6 +189,30 @@ class WRC_IE_Spider(scrapy.Spider):
             )
             return
 
+        # Older WRC case pages are HTML wrappers around a case PDF.
+        # Scope this selector to the case download so site-wide PDFs
+        # (for example, the Cookie Policy) are never mistaken for the document.
+        pdf_href = response.css(
+            "div.related-item a.download::attr(href)"
+        ).get()
+        pdf_url = response.urljoin(pdf_href) if pdf_href else None
+
+        if pdf_url and self._is_pdf_url(pdf_url):
+            yield scrapy.Request(
+                url=pdf_url,
+                callback=self.parse_pdf,
+                errback=self.handle_request_error,
+                cb_kwargs={
+                    "title": title,
+                    "identifier": identifier,
+                    "published_date": published_date,
+                    "partition_date": partition_date,
+                    "category": category,
+                    "description": description,
+                },
+            )
+            return
+
         try:
             content_node = response.css("h1.page-title + div.content")
             if not content_node:
@@ -204,30 +228,7 @@ class WRC_IE_Spider(scrapy.Spider):
             )
             return
 
-        # Some case pages may embed or link to a PDF instead of containing text.
         if not content:
-            pdf_href = response.xpath(
-                "//a[contains(translate(@href, 'PDF', 'pdf'), '.pdf')]/@href"
-                " | //iframe[contains(translate(@src, 'PDF', 'pdf'), '.pdf')]/@src"
-                " | //embed[contains(translate(@src, 'PDF', 'pdf'), '.pdf')]/@src"
-            ).get()
-
-            if pdf_href:
-                yield response.follow(
-                    pdf_href,
-                    callback=self.parse_pdf,
-                    errback=self.handle_request_error,
-                    cb_kwargs={
-                        "title": title,
-                        "identifier": identifier,
-                        "published_date": published_date,
-                        "partition_date": partition_date,
-                        "category": category,
-                        "description": description,
-                    },
-                )
-                return
-
             self.crawler.stats.inc_value("errors/html_empty")
             self.logger.warning(
                 "No HTML document content found: identifier=%s url=%s",
