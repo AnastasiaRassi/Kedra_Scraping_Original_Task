@@ -158,6 +158,7 @@ class WRC_IE_Spider(scrapy.Spider):
                     "partition_date": partition_date,
                     "category": category,
                     "description": description,
+                    "landing_url": document_url,
                 }
             )
         next_page = response.css(
@@ -184,6 +185,7 @@ class WRC_IE_Spider(scrapy.Spider):
         partition_date: str,
         category: str,
         description: str | None,
+        landing_url: str,
     ):
         """Extract a case whose document is an HTML page."""
         content_type = response.headers.get(b"Content-Type", b"").lower()
@@ -196,6 +198,7 @@ class WRC_IE_Spider(scrapy.Spider):
                 partition_date=partition_date,
                 category=category,
                 description=description,
+                landing_url=landing_url,
             )
             return
 
@@ -219,6 +222,7 @@ class WRC_IE_Spider(scrapy.Spider):
                     "partition_date": partition_date,
                     "category": category,
                     "description": description,
+                    "landing_url": landing_url,
                 },
             )
             return
@@ -267,6 +271,8 @@ class WRC_IE_Spider(scrapy.Spider):
             category=category,
             source_format="html",
             doc_url=response.url,
+            landing_url=landing_url,
+            raw_content=response.body,
             description=description,
         )
 
@@ -279,6 +285,7 @@ class WRC_IE_Spider(scrapy.Spider):
         partition_date: str,
         category: str,
         description: str | None,
+        landing_url: str,
     ):
         """Extract text from a PDF document."""
         content = ""
@@ -329,6 +336,8 @@ class WRC_IE_Spider(scrapy.Spider):
             category=category,
             source_format="pdf",
             doc_url=response.url,
+            landing_url=landing_url,
+            raw_content=response.body,
             description=description,
         )
 

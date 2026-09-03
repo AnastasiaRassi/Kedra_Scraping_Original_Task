@@ -19,5 +19,7 @@ class KedraScraperItem:
     category: str
     source_format: Literal["html", "pdf"]
     doc_url: str
+    landing_url: str
+    raw_content: bytes = field(repr=False)
     description: str | None = None
     source_metadata: dict[str, Any] = field(default_factory=dict)

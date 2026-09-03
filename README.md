@@ -17,8 +17,9 @@ The WRC spider currently supports:
 - JSON Lines export for local testing.
 - A shared item schema with flexible source-specific metadata.
 - Deterministic SHA-256 hashes of extracted document content.
+- Optional idempotent persistence to MinIO and MongoDB.
 
-MongoDB/GridFS persistence is planned but is not enabled yet. The current item pipeline is still a pass-through stub.
+Persistence is disabled by default so local JSON test crawls do not require either service. When enabled, original document bytes are stored in MinIO before the searchable record is upserted into MongoDB.
 
 ## Supported WRC categories
 
@@ -39,6 +40,15 @@ pip install -r requirements.txt
 ```
 
 Run commands from the repository root, where `scrapy.cfg` is located.
+
+
+To configure persistence, copy the example environment file and edit its local credentials:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Leave `PERSISTENCE_ENABLED=false` for JSON-only test crawls. Set it to `true` only when both MongoDB and MinIO are running.
 
 ## Running the WRC spider
 
@@ -122,6 +132,8 @@ Every source-specific spider maps its data into the same item:
 | `category` | `str` | Source collection or WRC Body category |
 | `source_format` | `"html" \| "pdf"` | Format from which content was extracted |
 | `doc_url` | `str` | Final HTML or PDF document URL |
+| `landing_url` | `str` | Stable case URL discovered in the search results |
+| `raw_content` | `bytes` | Internal original response bytes; removed by the first pipeline before export |
 | `description` | `str \| None` | Source-provided record description |
 | `source_metadata` | `dict[str, Any]` | Additional useful fields unique to a source |
 
@@ -139,6 +151,7 @@ For example:
   "category": "Employment Appeals Tribunal",
   "source_format": "pdf",
   "doc_url": "https://www.workplacerelations.ie/en/eat_import/...pdf",
+  "landing_url": "https://www.workplacerelations.ie/en/cases/...html",
   "description": "CASE DESCRIPTION",
   "source_metadata": {}
 }
@@ -146,7 +159,39 @@ For example:
 
 `source_metadata` defaults to an empty dictionary, so existing spiders remain compatible. Future sources can preserve fields such as judges, legislation, hearing dates or court names without changing the common top-level contract.
 
-`content_hash` is calculated from the exact extracted `content` encoded as UTF-8. It represents the logical text of both HTML and PDF documents. A separate raw-file hash can be added later when original files are stored with GridFS.
+`content_hash` is calculated from the exact extracted `content` encoded as UTF-8. It represents the logical text of both HTML and PDF documents. The MinIO pipeline separately calculates `blob.sha256` from the original response bytes.
+
+## Persistence
+
+Persistence is implemented as two ordered item pipelines:
+
+1. `MinioPipeline` builds the stable `record_key`, removes the internal raw bytes from the exported item, and stores the original HTML/PDF file.
+2. `MongoPipeline` upserts the document metadata, extracted text, hashes and MinIO reference.
+
+The identity is:
+
+```text
+record_key = SHA256(source + "|" + landing_url)
+```
+
+The source identifier is not used as the unique database key because identifiers can be missing or duplicated. MongoDB creates a unique index on `record_key`.
+
+MinIO object names are deterministic:
+
+```text
+documents/{record_key}.html
+documents/{record_key}.pdf
+```
+
+On repeated crawls:
+
+- An unchanged MinIO blob is not uploaded again.
+- MongoDB updates the existing row rather than inserting a duplicate.
+- `last_seen_at` records the latest successful crawl.
+- `content_updated_at` changes only when extracted content or the original blob changes.
+- A changed source document replaces the deterministic MinIO object and updates MongoDB.
+
+If persistence is enabled but either service cannot be reached, the crawl fails during startup. If an individual upload or upsert fails, that item is dropped, logged and counted rather than being reported as successfully persisted.
 
 ## Crawl statistics and failures
 
@@ -162,6 +207,11 @@ The spider records statistics including:
 - `errors/pdf_parsing`
 - `errors/pdf_empty`
 - `errors/document_hashing`
+- `errors/persistence_identity`
+- `errors/minio_payload`
+- `errors/minio_write`
+- `errors/mongodb_payload`
+- `errors/mongodb_write`
 
 The final reconciliation summary compares discovered search results with yielded items:
 
@@ -210,9 +260,7 @@ AutoThrottle adjusts request timing based on observed server latency. The config
 ## Planned work
 
 - Replace the deprecated `FormRequest.from_response()` flow with `form2request`.
-- Implement MongoDB metadata persistence.
-- Store original document files using GridFS.
-- Add idempotent upserts and stable record keys.
 - Populate source-specific metadata.
 - Add OCR handling for scanned PDFs.
-- Add automated parser and integration tests.
+- Add automated parser and persistence integration tests.
+- Add production secret management and deployment configuration.
