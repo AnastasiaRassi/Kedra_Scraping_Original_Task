@@ -180,10 +180,12 @@ A complete test over `01-01-2008` through `31-03-2008` produced:
 - 159 HTML documents
 - 260 PDF documents
 - 0 final request failures
-- 1 source-side empty document: `PW18/2007`
+- 1 empty duplicate landing page for `PW18/2007`; the separate PDF-backed `PW18/2007` URL was extracted successfully
 - 0 unexplained missing records
 
-The `PW18/2007` landing page contains neither HTML document content nor a PDF download link, so it is intentionally recorded as an extraction failure instead of yielding an empty item.
+WRC exposes two distinct landing-page URLs named `PW18/2007`. `pw18_20071.html` is an HTML wrapper with a downloadable PDF and is extracted successfully. `pw18_2007.html` contains neither HTML document content nor a PDF download link, so only that empty duplicate URL is recorded as an extraction failure instead of yielding an empty item.
+
+A source identifier must therefore not be assumed to be unique. The future persistence layer should use a stable source URL or generated record key for idempotency rather than relying only on `source + identifier`.
 
 ## Request settings
 
