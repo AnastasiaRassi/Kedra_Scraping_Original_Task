@@ -10,34 +10,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # these data classes define the form of the config required per site
 
-@dataclass(frozen=True)
-class BodyCategoryConfig:  # The expected form of the categories on a site, for config loading
-    name: str
-    form_field: str
-    form_value: str
-
-
-@dataclass(frozen=True)
-class FormConfig: # like above but the form of the site 
-    xpath: str
-    start_date_field: str
-    end_date_field: str
-    submit_field: str
-    submit_value: str
-
-
-@dataclass(frozen=True)
-class SelectorConfig:
-    result_card: str
-    document_link: str
-    identifier: str
-    published_date: str
-    description: str
-    next_page: str
-    pdf_download: str
-    html_content: tuple[str, ...]
-
-
 
 @dataclass(frozen=True)
 class SourceRegistryEntry: # schema of characteristics of a source's spider, representing entries in sources.json
