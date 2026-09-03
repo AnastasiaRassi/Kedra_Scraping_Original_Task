@@ -3,8 +3,8 @@
 # See documentation in:
 # https://docs.scrapy.org/en/latest/topics/items.html
 
-from dataclasses import dataclass
-from typing import Literal
+from dataclasses import dataclass, field
+from typing import Any, Literal
 
 
 @dataclass
@@ -19,3 +19,4 @@ class KedraScraperItem:
     source_format: Literal["html", "pdf"]
     doc_url: str
     description: str | None = None
+    source_metadata: dict[str, Any] = field(default_factory=dict)
