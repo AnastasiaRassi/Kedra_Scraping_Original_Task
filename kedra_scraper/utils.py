@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from hashlib import sha256
+import os
 from pathlib import Path
 from typing import Any
 
@@ -77,3 +78,54 @@ def write_crawl_summary(path_value: str, summary: dict[str, Any]) -> None:
         encoding="utf-8",
     )
     temporary.replace(destination)
+
+
+
+def env_int(
+    name: str,
+    default: int,
+    *,
+    minimum: int | None = None,
+) -> int:
+    raw_value = os.getenv(name)
+    try:
+        value = default if raw_value is None else int(raw_value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+
+    if minimum is not None and value < minimum:
+        raise ValueError(f"{name} must be at least {minimum}")
+    return value
+
+
+def env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+
+    normalised = value.strip().lower()
+    if normalised in {"1", "true", "yes", "on"}:
+        return True
+    if normalised in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(
+        f"{name} must be one of true/false, yes/no, on/off or 1/0"
+    )
+
+
+
+def env_float(
+    name: str,
+    default: float,
+    *,
+    minimum: float | None = None,
+) -> float:
+    raw_value = os.getenv(name)
+    try:
+        value = default if raw_value is None else float(raw_value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a number") from exc
+
+    if minimum is not None and value < minimum:
+        raise ValueError(f"{name} must be at least {minimum}")
+    return value
