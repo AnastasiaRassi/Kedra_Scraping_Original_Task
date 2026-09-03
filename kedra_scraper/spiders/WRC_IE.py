@@ -9,7 +9,10 @@ import scrapy
 from pypdf import PdfReader
 
 from kedra_scraper.items import KedraScraperItem
-from kedra_scraper.utils import handle_request_error as record_request_error
+from kedra_scraper.utils import (
+    handle_request_error as record_request_error,
+    hash_document,
+)
 
 
 class WRC_IE_Spider(scrapy.Spider):
@@ -244,12 +247,21 @@ class WRC_IE_Spider(scrapy.Spider):
             )
             return
 
+        content_hash = self._hash_content(
+            content,
+            identifier=identifier,
+            url=response.url,
+        )
+        if content_hash is None:
+            return
+
         self.crawler.stats.inc_value("documents/html_extracted")
         yield KedraScraperItem(
             title=title,
             published_date=published_date,
             partition_date=partition_date,
             content=content,
+            content_hash=content_hash,
             identifier=identifier,
             source=self.source,
             category=category,
@@ -297,12 +309,21 @@ class WRC_IE_Spider(scrapy.Spider):
             )
             return
 
+        content_hash = self._hash_content(
+            content,
+            identifier=identifier,
+            url=response.url,
+        )
+        if content_hash is None:
+            return
+
         self.crawler.stats.inc_value("documents/pdf_extracted")
         yield KedraScraperItem(
             title=title,
             published_date=published_date,
             partition_date=partition_date,
             content=content,
+            content_hash=content_hash,
             identifier=identifier,
             source=self.source,
             category=category,
@@ -310,6 +331,24 @@ class WRC_IE_Spider(scrapy.Spider):
             doc_url=response.url,
             description=description,
         )
+
+    def _hash_content(
+        self,
+        content: str,
+        identifier: str | None,
+        url: str,
+    ) -> str | None:
+        """Hash extracted content while accounting for unexpected failures."""
+        try:
+            return hash_document(content)
+        except (TypeError, ValueError, UnicodeError):
+            self.crawler.stats.inc_value("errors/document_hashing")
+            self.logger.exception(
+                "Document hashing failed: identifier=%s url=%s",
+                identifier,
+                url,
+            )
+            return None
 
     def handle_request_error(self, failure) -> None:
         """Delegate request-failure recording to the shared utility."""
@@ -333,6 +372,7 @@ class WRC_IE_Spider(scrapy.Spider):
                 "errors/html_empty",
                 "errors/pdf_parsing",
                 "errors/pdf_empty",
+                "errors/document_hashing",
             )
         )
         dropped = stats.get_value("item_dropped_count", 0)
