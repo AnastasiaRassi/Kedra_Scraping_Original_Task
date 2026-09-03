@@ -16,6 +16,7 @@ The WRC spider currently supports:
 - Request and extraction failure accounting.
 - JSON Lines export for local testing.
 - A shared item schema with flexible source-specific metadata.
+- Deterministic SHA-256 hashes of extracted document content.
 
 MongoDB/GridFS persistence is planned but is not enabled yet. The current item pipeline is still a pass-through stub.
 
@@ -115,6 +116,7 @@ Every source-specific spider maps its data into the same item:
 | `published_date` | `str` | Normalised publication date in `YYYY-MM-DD` form |
 | `partition_date` | `str` | First date of the monthly crawl partition |
 | `content` | `str` | Extracted HTML or PDF text |
+| `content_hash` | `str` | SHA-256 hash of the extracted content |
 | `identifier` | `str \| None` | Source-provided document identifier, when available |
 | `source` | `str` | Source website |
 | `category` | `str` | Source collection or WRC Body category |
@@ -131,6 +133,7 @@ For example:
   "published_date": "2008-02-01",
   "partition_date": "2008-02-01",
   "content": "Extracted legal document text...",
+  "content_hash": "64-character SHA-256 hexadecimal digest",
   "identifier": "TE54/2007",
   "source": "https://www.workplacerelations.ie",
   "category": "Employment Appeals Tribunal",
@@ -142,6 +145,8 @@ For example:
 ```
 
 `source_metadata` defaults to an empty dictionary, so existing spiders remain compatible. Future sources can preserve fields such as judges, legislation, hearing dates or court names without changing the common top-level contract.
+
+`content_hash` is calculated from the exact extracted `content` encoded as UTF-8. It represents the logical text of both HTML and PDF documents. A separate raw-file hash can be added later when original files are stored with GridFS.
 
 ## Crawl statistics and failures
 
@@ -156,6 +161,7 @@ The spider records statistics including:
 - `errors/html_empty`
 - `errors/pdf_parsing`
 - `errors/pdf_empty`
+- `errors/document_hashing`
 
 The final reconciliation summary compares discovered search results with yielded items:
 
