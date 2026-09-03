@@ -3,3 +3,6 @@ pypdf>=6.0,<7.0
 pymongo[srv]>=4.10,<5.0
 python-dotenv>=1.0,<2.0
 minio>=7.2,<8
+dagster
+dagster-webserver
+dagster-dg-cli
