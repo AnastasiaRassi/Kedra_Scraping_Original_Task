@@ -10,6 +10,8 @@ from scrapy.spidermiddlewares.httperror import HttpError
 from twisted.internet.error import DNSLookupError, TCPTimedOutError, TimeoutError
 from twisted.python.failure import Failure
 
+from kedra_scraper.config import load_source_registry
+
 
 def hash_document(content: str | bytes) -> str:
     """Return a SHA-256 hash for non-empty document content."""
@@ -129,3 +131,14 @@ def env_float(
     if minimum is not None and value < minimum:
         raise ValueError(f"{name} must be at least {minimum}")
     return value
+
+def env_csv(name: str, default: str) -> set[str]:
+    values = {
+        item.strip()
+        for item in os.getenv(name, default).split(",")
+        if item.strip()
+    }
+    if not values:
+        raise ValueError(f"{name} must contain at least one value")
+    return values
+

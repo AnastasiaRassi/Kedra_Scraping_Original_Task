@@ -6,7 +6,9 @@ import tempfile
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
-
+SOURCE_REGISTRY = load_source_registry(
+    os.getenv("SOURCE_REGISTRY_PATH", "config/sources.json")
+)
 from dagster import (
     AssetExecutionContext,
     AssetSelection,
@@ -29,75 +31,18 @@ from dotenv import load_dotenv
 
 from kedra_scraper.config import SourceRegistryEntry, load_source_registry
 from kedra_scraper.scraping import scrape_partition
+from kedra_scraper.utils import env_bool, env_csv, env_float, env_int
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
 
-def _env_bool(name: str, default: bool) -> bool:
-    raw_value = os.getenv(name)
-    if raw_value is None:
-        return default
-    value = raw_value.strip().lower()
-    if value in {"1", "true", "yes", "on"}:
-        return True
-    if value in {"0", "false", "no", "off"}:
-        return False
-    raise ValueError(f"{name} must contain a Boolean value")
-
-
-def _env_int(
-    name: str,
-    default: int,
-    *,
-    minimum: int | None = None,
-) -> int:
-    raw_value = os.getenv(name)
-    try:
-        value = default if raw_value is None else int(raw_value)
-    except ValueError as exc:
-        raise ValueError(f"{name} must be an integer") from exc
-    if minimum is not None and value < minimum:
-        raise ValueError(f"{name} must be at least {minimum}")
-    return value
-
-
-def _env_float(
-    name: str,
-    default: float,
-    *,
-    minimum: float | None = None,
-) -> float:
-    raw_value = os.getenv(name)
-    try:
-        value = default if raw_value is None else float(raw_value)
-    except ValueError as exc:
-        raise ValueError(f"{name} must be a number") from exc
-    if minimum is not None and value < minimum:
-        raise ValueError(f"{name} must be at least {minimum}")
-    return value
-
-
-def _env_csv(name: str, default: str) -> set[str]:
-    values = {
-        item.strip()
-        for item in os.getenv(name, default).split(",")
-        if item.strip()
-    }
-    if not values:
-        raise ValueError(f"{name} must contain at least one value")
-    return values
-
-SOURCE_REGISTRY = load_source_registry(
-    os.getenv("SOURCE_REGISTRY_PATH", "config/sources.json")
-)
-
 MONTHLY_PARTITIONS = MonthlyPartitionsDefinition(
     start_date=os.getenv("DAGSTER_PARTITION_START_DATE", "2000-01-01"),
     end_date=os.getenv("DAGSTER_PARTITION_END_DATE") or None,
     timezone=os.getenv("DAGSTER_PARTITION_TIMEZONE", "Europe/Dublin"),
-    end_offset=_env_int("DAGSTER_PARTITION_END_OFFSET", 0),
+    end_offset=env_int("DAGSTER_PARTITION_END_OFFSET", 0),
 )
 
 SOURCE_MONTH_PARTITIONS = MultiPartitionsDefinition(
@@ -108,8 +53,8 @@ SOURCE_MONTH_PARTITIONS = MultiPartitionsDefinition(
 )
 
 TASK_RETRY_POLICY = RetryPolicy(
-    max_retries=_env_int("DAGSTER_CRAWL_MAX_RETRIES", 2, minimum=0),
-    delay=_env_float(
+    max_retries=env_int("DAGSTER_CRAWL_MAX_RETRIES", 2, minimum=0),
+    delay=env_float(
         "DAGSTER_CRAWL_RETRY_DELAY_SECONDS",
         30.0,
         minimum=0.0,
@@ -133,7 +78,7 @@ def raw_documents(context: AssetExecutionContext) -> MaterializeResult:
     source_config, partition_date, start_date, end_date = _partition_context(
         context
     )
-    timeout_seconds = _env_float(
+    timeout_seconds = env_float(
         "DAGSTER_CRAWL_TIMEOUT_SECONDS",
         7200.0,
         minimum=1.0,
@@ -238,7 +183,7 @@ def scraped_documents(context: AssetExecutionContext) -> MaterializeResult:
             "Scraping completed with %s document extraction failure(s)",
             failed,
         )
-        if _env_bool("DAGSTER_FAIL_ON_SCRAPING_ERRORS", False):
+        if env_bool("DAGSTER_FAIL_ON_SCRAPING_ERRORS", False):
             raise Failure(
                 description=(
                     f"{failed} document(s) could not be scraped for "
@@ -363,7 +308,7 @@ def _read_summary(path: Path) -> dict[str, Any]:
 
 
 def _ingestion_violations(summary: dict[str, Any]) -> list[str]:
-    allowed_reasons = _env_csv("DAGSTER_ALLOWED_CLOSE_REASONS", "finished")
+    allowed_reasons = env_csv("DAGSTER_ALLOWED_CLOSE_REASONS", "finished")
     violations: list[str] = []
     request_failures = _summary_int(
         summary,
@@ -377,15 +322,15 @@ def _ingestion_violations(summary: dict[str, Any]) -> list[str]:
     limits = {
         "request failures": (
             request_failures,
-            _env_int("DAGSTER_MAX_REQUEST_FAILURES", 0, minimum=0),
+            env_int("DAGSTER_MAX_REQUEST_FAILURES", 0, minimum=0),
         ),
         "persistence errors": (
             _summary_int(summary, "persistence_errors", violations),
-            _env_int("DAGSTER_MAX_PERSISTENCE_ERRORS", 0, minimum=0),
+            env_int("DAGSTER_MAX_PERSISTENCE_ERRORS", 0, minimum=0),
         ),
         "unexplained missing documents": (
             _summary_int(summary, "unexplained_missing", violations),
-            _env_int("DAGSTER_MAX_UNEXPLAINED_MISSING", 0, minimum=0),
+            env_int("DAGSTER_MAX_UNEXPLAINED_MISSING", 0, minimum=0),
         ),
     }
 
@@ -400,7 +345,7 @@ def _ingestion_violations(summary: dict[str, Any]) -> list[str]:
 
 
 def _require_persistence() -> None:
-    if not _env_bool("PERSISTENCE_ENABLED", False):
+    if not env_bool("PERSISTENCE_ENABLED", False):
         raise Failure(
             description=(
                 "Dagster assets require PERSISTENCE_ENABLED=true because "
@@ -430,8 +375,8 @@ def _subprocess_tail(output: str | bytes | None) -> str:
         if isinstance(output, bytes)
         else output
     )
-    line_count = _env_int("DAGSTER_SUBPROCESS_LOG_TAIL_LINES", 80, minimum=1)
-    character_limit = _env_int(
+    line_count = env_int("DAGSTER_SUBPROCESS_LOG_TAIL_LINES", 80, minimum=1)
+    character_limit = env_int(
         "DAGSTER_SUBPROCESS_LOG_TAIL_CHARACTERS",
         12_000,
         minimum=1,
