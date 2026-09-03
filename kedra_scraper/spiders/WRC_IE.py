@@ -7,6 +7,9 @@ from urllib.parse import urlsplit
 
 import scrapy
 from pypdf import PdfReader
+from scrapy.spidermiddlewares.httperror import HttpError
+from twisted.internet.error import DNSLookupError, TCPTimedOutError, TimeoutError
+from twisted.python.failure import Failure
 
 from kedra_scraper.items import KedraScraperItem
 
@@ -102,6 +105,10 @@ class WRC_IE_Spider(scrapy.Spider):
     def parse(self, response, category: str, partition_date: str):
         """Read one results page, follow its documents, then follow pagination."""
         result_cards = response.css("li.each-item")
+        self.crawler.stats.inc_value(
+            "documents/expected",
+            count=len(result_cards),
+        )
 
         if not result_cards:
             self.logger.debug("No results found at %s", response.url)
@@ -117,12 +124,14 @@ class WRC_IE_Spider(scrapy.Spider):
             description = None
 
             if not document_href or not identifier or not published_date:
+                self.crawler.stats.inc_value("documents/incomplete_result")
                 self.logger.warning(
                     "Skipping an incomplete search result on %s",
                     response.url,
                 )
                 continue
 
+            self.crawler.stats.inc_value("documents/scheduled")
             document_url = response.urljoin(document_href)
             callback = (
                 self.parse_pdf
@@ -182,11 +191,20 @@ class WRC_IE_Spider(scrapy.Spider):
             )
             return
 
-        content_node = response.css("h1.page-title + div.content")
-        if not content_node:
-            content_node = response.css("div.col-sm-9 > div.content")
+        try:
+            content_node = response.css("h1.page-title + div.content")
+            if not content_node:
+                content_node = response.css("div.col-sm-9 > div.content")
 
-        content = self._selector_text(content_node)
+            content = self._selector_text(content_node)
+        except Exception:
+            self.crawler.stats.inc_value("errors/html_parsing")
+            self.logger.exception(
+                "HTML parsing failed: identifier=%s url=%s",
+                identifier,
+                response.url,
+            )
+            return
 
         # Some case pages may embed or link to a PDF instead of containing text.
         if not content:
@@ -200,6 +218,7 @@ class WRC_IE_Spider(scrapy.Spider):
                 yield response.follow(
                     pdf_href,
                     callback=self.parse_pdf,
+                    errback=self.handle_request_error,
                     cb_kwargs={
                         "title": title,
                         "identifier": identifier,
@@ -211,8 +230,15 @@ class WRC_IE_Spider(scrapy.Spider):
                 )
                 return
 
-            self.logger.warning("No document content found at %s", response.url)
+            self.crawler.stats.inc_value("errors/html_empty")
+            self.logger.warning(
+                "No HTML document content found: identifier=%s url=%s",
+                identifier,
+                response.url,
+            )
+            return
 
+        self.crawler.stats.inc_value("documents/html_extracted")
         yield KedraScraperItem(
             title=title,
             published_date=published_date,
@@ -246,15 +272,26 @@ class WRC_IE_Spider(scrapy.Spider):
                 for page in reader.pages
                 if (text := (page.extract_text() or "").strip())
             )
-        except Exception as exc:
-            self.logger.error("Could not read PDF %s: %s", response.url, exc)
-
-        if not content:
-            self.logger.warning(
-                "No extractable PDF text found at %s; it may be scanned",
+        except Exception:
+            self.crawler.stats.inc_value("errors/pdf_parsing")
+            self.logger.exception(
+                "PDF parsing failed: identifier=%s url=%s",
+                identifier,
                 response.url,
             )
+            return
 
+        if not content:
+            self.crawler.stats.inc_value("errors/pdf_empty")
+            self.logger.warning(
+                "No extractable PDF text found: identifier=%s url=%s; "
+                "the document may be scanned",
+                identifier,
+                response.url,
+            )
+            return
+
+        self.crawler.stats.inc_value("documents/pdf_extracted")
         yield KedraScraperItem(
             title=title,
             published_date=published_date,
@@ -267,6 +304,93 @@ class WRC_IE_Spider(scrapy.Spider):
             doc_url=response.url,
             description=description,
         )
+
+    def handle_request_error(self, failure: Failure) -> None:
+        """Record a document request that ultimately failed."""
+        request = failure.request
+        identifier = request.cb_kwargs.get("identifier", "unknown")
+        stats = self.crawler.stats
+
+        stats.inc_value("documents/request_failed")
+
+        if failure.check(HttpError):
+            status = failure.value.response.status
+            error_type = f"http_{status}"
+            stats.inc_value(f"errors/{error_type}")
+        elif failure.check(DNSLookupError):
+            error_type = "dns"
+            stats.inc_value("errors/dns")
+        elif failure.check(TimeoutError, TCPTimedOutError):
+            error_type = "timeout"
+            stats.inc_value("errors/timeout")
+        else:
+            error_type = type(failure.value).__name__
+            stats.inc_value(f"errors/request/{error_type}")
+
+        self.logger.error(
+            "Document request failed: identifier=%s url=%s "
+            "error_type=%s detail=%s",
+            identifier,
+            request.url,
+            error_type,
+            failure.getErrorMessage(),
+        )
+
+    def closed(self, reason: str) -> None:
+        """Log a reconciliation summary after all requests and items finish."""
+        stats = self.crawler.stats
+
+        expected = stats.get_value("documents/expected", 0)
+        scraped = stats.get_value("item_scraped_count", 0)
+        request_failed = stats.get_value("documents/request_failed", 0)
+        incomplete_results = stats.get_value(
+            "documents/incomplete_result",
+            0,
+        )
+        extraction_failed = sum(
+            stats.get_value(key, 0)
+            for key in (
+                "errors/html_parsing",
+                "errors/html_empty",
+                "errors/pdf_parsing",
+                "errors/pdf_empty",
+            )
+        )
+        dropped = stats.get_value("item_dropped_count", 0)
+        missing = max(expected - scraped, 0)
+        explained_missing = (
+            request_failed
+            + incomplete_results
+            + extraction_failed
+            + dropped
+        )
+        unexplained_missing = max(missing - explained_missing, 0)
+
+        self.logger.info(
+            "CRAWL SUMMARY: reason=%s expected=%d scraped=%d "
+            "request_failed=%d extraction_failed=%d "
+            "incomplete_results=%d dropped=%d missing=%d unexplained=%d",
+            reason,
+            expected,
+            scraped,
+            request_failed,
+            extraction_failed,
+            incomplete_results,
+            dropped,
+            missing,
+            unexplained_missing,
+        )
+
+        if missing:
+            self.logger.warning(
+                "Crawl finished with missing documents: expected=%d "
+                "scraped=%d missing=%d explained=%d unexplained=%d",
+                expected,
+                scraped,
+                missing,
+                min(explained_missing, missing),
+                unexplained_missing,
+            )
 
     @staticmethod
     def _parse_scraped_date(value: str, argument_name: str) -> date:
