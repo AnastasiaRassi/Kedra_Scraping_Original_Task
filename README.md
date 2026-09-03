@@ -175,6 +175,52 @@ scrapy crawl WRC_IE `
 Several requests may already be in flight, so a limit of 100 can produce
 slightly more than 100 items before the spider stops.
 
+## Profile a spider
+
+The opt-in crawl profiler runs any registered source or spider and writes a
+timestamped JSON report. Persistence is disabled unless
+`--with-persistence` is supplied, so profiling does not modify MongoDB or
+MinIO by default.
+
+Run a bounded profile through the source registry:
+
+```powershell
+python -m benchmarks.crawl_profiler `
+  --source wrc_ie `
+  -a start_date=01-01-2008 `
+  -a end_date=31-01-2008 `
+  --max-items 100 `
+  -s CONCURRENT_REQUESTS_PER_DOMAIN=4 `
+  -s AUTOTHROTTLE_TARGET_CONCURRENCY=2
+```
+
+Use `--spider WRC_IE` instead of `--source wrc_ie` to address a spider
+directly. Repeat `-a NAME=VALUE` for spider arguments and `-s NAME=VALUE`
+for settings being evaluated.
+
+Each report under `reports/crawl_profiles/` records:
+
+- The exact concurrency, throttling, timeout and retry settings used.
+- Duration, scraped documents per minute and response-byte volume.
+- Response-latency minimum, mean, p50, p95, p99 and maximum.
+- HTTP status counts and rates, including `403`, `429` and combined `5xx`.
+- Retry attempts, successful retry chains, exhausted chains and recovery rate.
+- Expected, scraped, missing, dropped and extraction-failure counts.
+
+When `--max-items` stops a sampled crawl, the report leaves
+`unexplained_missing` unevaluated because the crawl was intentionally
+incomplete. Use an uncapped representative partition to assess completeness.
+
+The deterministic profiler calculations can be tested without contacting a
+website:
+
+```powershell
+python -m unittest discover -s tests -v
+```
+
+Live profiles are operational measurements rather than normal CI tests:
+external websites and network conditions can change between runs.
+
 ## Run with Dagster
 
 Dagster requires persistence because the assets communicate through MongoDB

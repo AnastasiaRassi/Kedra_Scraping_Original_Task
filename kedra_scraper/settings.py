@@ -74,6 +74,7 @@ SCRAPE_MODE = os.getenv("SCRAPE_MODE", "full").strip().lower()
 if SCRAPE_MODE not in {"full", "ingestion"}:
     raise ValueError("SCRAPE_MODE must be either 'full' or 'ingestion'")
 CRAWL_SUMMARY_PATH = os.getenv("CRAWL_SUMMARY_PATH")
+CRAWL_PROFILE_PATH = os.getenv("CRAWL_PROFILE_PATH")
 
 # Request identity, output and protocol behaviour.
 USER_AGENT = os.getenv("SCRAPY_USER_AGENT", "KedraScraper/1.0")
@@ -167,10 +168,14 @@ MINIO_SECURE = _env_bool("MINIO_SECURE", False)
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "kedra-documents")
 MINIO_PREFIX = os.getenv("MINIO_PREFIX", "documents")
 
-# Optional project components remain disabled until needed.
+# The profiler is dormant unless CRAWL_PROFILE_PATH is supplied.
+EXTENSIONS = {
+    "kedra_scraper.extensions.CrawlProfilerExtension": 500,
+}
+
+# Optional middleware components remain disabled until needed.
 # SPIDER_MIDDLEWARES = {}
 # DOWNLOADER_MIDDLEWARES = {}
-# EXTENSIONS = {}
 
 # HTTP caching remains disabled by default.
 # HTTPCACHE_ENABLED = True
