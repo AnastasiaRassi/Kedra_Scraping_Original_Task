@@ -303,16 +303,11 @@ def _run_scrapy(
             env=os.environ.copy(),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout_seconds,
             check=False,
         )
-
-        if result.returncode != 0:
-            context.log.error(f"Scrapy stdout:\n{result.stdout}")
-            context.log.error(f"Scrapy stderr:\n{result.stderr}")
-
-            raise Failure(
-                description=f"Scrapy exited with code {result.returncode}"
-            )
     except subprocess.TimeoutExpired as exc:
         _log_subprocess_tail(context, "stdout", exc.stdout)
         _log_subprocess_tail(context, "stderr", exc.stderr)
@@ -327,10 +322,17 @@ def _run_scrapy(
         ) from exc
 
     if result.returncode != 0:
-        _log_subprocess_tail(context, "stdout", result.stdout)
-        _log_subprocess_tail(context, "stderr", result.stderr)
+        stdout_tail = _subprocess_tail(result.stdout)
+        stderr_tail = _subprocess_tail(result.stderr)
+        _log_subprocess_tail(context, "stdout", stdout_tail)
+        _log_subprocess_tail(context, "stderr", stderr_tail)
+
+        diagnostic = stderr_tail or stdout_tail or "Scrapy produced no output."
         raise Failure(
-            description=f"Scrapy exited with code {result.returncode}",
+            description=(
+                f"Scrapy exited with code {result.returncode}. "
+                f"Last subprocess output:\n{diagnostic}"
+            ),
             metadata={"return_code": result.returncode},
             allow_retries=True,
         )
@@ -420,21 +422,32 @@ def _summary_int(
     return value
 
 
-def _log_subprocess_tail(
-    context: AssetExecutionContext,
-    stream_name: str,
-    output: str | bytes | None,
-) -> None:
+def _subprocess_tail(output: str | bytes | None) -> str:
     if not output:
-        return
+        return ""
     text = (
         output.decode("utf-8", errors="replace")
         if isinstance(output, bytes)
         else output
     )
     line_count = _env_int("DAGSTER_SUBPROCESS_LOG_TAIL_LINES", 80, minimum=1)
+    character_limit = _env_int(
+        "DAGSTER_SUBPROCESS_LOG_TAIL_CHARACTERS",
+        12_000,
+        minimum=1,
+    )
     tail = "\n".join(text.splitlines()[-line_count:])
-    context.log.error("Scrapy %s tail:\n%s", stream_name, tail)
+    return tail[-character_limit:]
+
+
+def _log_subprocess_tail(
+    context: AssetExecutionContext,
+    stream_name: str,
+    output: str | bytes | None,
+) -> None:
+    tail = _subprocess_tail(output)
+    if tail:
+        context.log.error("Scrapy %s tail:\n%s", stream_name, tail)
 
 
 document_pipeline_job = define_asset_job(
