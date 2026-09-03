@@ -2,8 +2,14 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-
+from ..config import (
+mapping,
+non_empty_string,
+optional_string,
+string_tuple,
+text) 
 from kedra_scraper.config import resolve_project_path
+
 @dataclass(frozen=True)
 class BodyCategoryConfig:  # The expected form of the categories on a site, for config loading
     name: str
@@ -51,17 +57,17 @@ def load_wrc_source_config(value: str) -> WRCSourceConfig:
     path = resolve_project_path(value)
 
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        raw = json.loads(path.readtext(encoding="utf-8"))
     except FileNotFoundError as exc:
         raise ValueError(f"WRC config file does not exist: {path}") from exc
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise ValueError(f"Cannot read WRC config file {path}: {exc}") from exc
 
-    root = _mapping(raw, "root")
-    form_raw = _mapping(root.get("form"), "form")
-    selectors_raw = _mapping(root.get("selectors"), "selectors")
-    date_formats = _mapping(root.get("date_formats"), "date_formats")
-    query_raw = _mapping(root.get("search_query"), "search_query")
+    root = mapping(raw, "root")
+    form_raw = mapping(root.get("form"), "form")
+    selectors_raw = mapping(root.get("selectors"), "selectors")
+    date_formats = mapping(root.get("date_formats"), "date_formats")
+    query_raw = mapping(root.get("search_query"), "search_query")
 
     categories_raw = root.get("body_categories")
     if not isinstance(categories_raw, list) or not categories_raw:
@@ -70,18 +76,18 @@ def load_wrc_source_config(value: str) -> WRCSourceConfig:
     categories_list: list[BodyCategoryConfig] = []
     for index, item in enumerate(categories_raw):
         context = f"body_categories[{index}]"
-        category = _mapping(item, context)
+        category = mapping(item, context)
         categories_list.append(
             BodyCategoryConfig(
-                name=_text(category, "name", context),
-                form_field=_text(category, "form_field", context),
-                form_value=_text(category, "form_value", context),
+                name=text(category, "name", context),
+                form_field=text(category, "form_field", context),
+                form_value=text(category, "form_value", context),
             )
         )
     categories = tuple(categories_list)
 
     search_query = {
-        _non_empty_string(key, "search_query key"): _non_empty_string(
+        non_empty_string(key, "search_query key"): non_empty_string(
             item,
             f"search_query[{key!r}]",
         )
@@ -89,56 +95,56 @@ def load_wrc_source_config(value: str) -> WRCSourceConfig:
     }
 
     return WRCSourceConfig(
-        source=_text(root, "source", "root"),
-        search_url=_text(root, "search_url", "root"),
-        allowed_domains=_string_tuple(
+        source=text(root, "source", "root"),
+        search_url=text(root, "search_url", "root"),
+        allowed_domains=string_tuple(
             root.get("allowed_domains"),
             "allowed_domains",
         ),
         search_query=search_query,
         form=FormConfig(
-            xpath=_text(form_raw, "xpath", "form"),
-            start_date_field=_text(form_raw, "start_date_field", "form"),
-            end_date_field=_text(form_raw, "end_date_field", "form"),
-            submit_field=_text(form_raw, "submit_field", "form"),
-            submit_value=_optional_string(
+            xpath=text(form_raw, "xpath", "form"),
+            start_date_field=text(form_raw, "start_date_field", "form"),
+            end_date_field=text(form_raw, "end_date_field", "form"),
+            submit_field=text(form_raw, "submit_field", "form"),
+            submit_value=optional_string(
                 form_raw.get("submit_value", ""),
                 "form.submit_value",
             ),
         ),
         body_categories=categories,
         selectors=SelectorConfig(
-            result_card=_text(selectors_raw, "result_card", "selectors"),
-            document_link=_text(
+            result_card=text(selectors_raw, "result_card", "selectors"),
+            document_link=text(
                 selectors_raw,
                 "document_link",
                 "selectors",
             ),
-            identifier=_text(selectors_raw, "identifier", "selectors"),
-            published_date=_text(
+            identifier=text(selectors_raw, "identifier", "selectors"),
+            published_date=text(
                 selectors_raw,
                 "published_date",
                 "selectors",
             ),
-            description=_text(selectors_raw, "description", "selectors"),
-            next_page=_text(selectors_raw, "next_page", "selectors"),
-            pdf_download=_text(
+            description=text(selectors_raw, "description", "selectors"),
+            next_page=text(selectors_raw, "next_page", "selectors"),
+            pdf_download=text(
                 selectors_raw,
                 "pdf_download",
                 "selectors",
             ),
-            html_content=_string_tuple(
+            html_content=string_tuple(
                 selectors_raw.get("html_content"),
                 "selectors.html_content",
             ),
         ),
-        input_date_formats=_string_tuple(
+        input_date_formats=string_tuple(
             date_formats.get("input"),
             "date_formats.input",
         ),
-        published_date_formats=_string_tuple(
+        published_date_formats=string_tuple(
             date_formats.get("published"),
             "date_formats.published",
         ),
-        form_date_format=_text(date_formats, "form", "date_formats"),
+        form_date_format=text(date_formats, "form", "date_formats"),
     )
