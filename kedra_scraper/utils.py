@@ -1,34 +1,35 @@
-from twisted.python.failure import Failure
 from scrapy.spidermiddlewares.httperror import HttpError
-from twisted.internet.error import DNSLookupError, TimeoutError
+from twisted.internet.error import DNSLookupError, TCPTimedOutError, TimeoutError
+from twisted.python.failure import Failure
 
 
-def handle_request_error(self, failure: Failure):
+def handle_request_error(spider, failure: Failure) -> None:
+    """Record a document request that ultimately failed."""
     request = failure.request
-    stats = self.crawler.stats
+    identifier = request.cb_kwargs.get("identifier", "unknown")
+    stats = spider.crawler.stats
+
+    stats.inc_value("documents/request_failed")
 
     if failure.check(HttpError):
         status = failure.value.response.status
-        stats.inc_value(f"errors/http_{status}")
-
-        self.logger.error(
-            "Document request failed: status=%s url=%s",
-            status,
-            request.url,
-        )
-
-    elif failure.check(TimeoutError):
-        stats.inc_value("errors/timeout")
-        self.logger.error("Document timed out: url=%s", request.url)
-
+        error_type = f"http_{status}"
+        stats.inc_value(f"errors/{error_type}")
     elif failure.check(DNSLookupError):
+        error_type = "dns"
         stats.inc_value("errors/dns")
-        self.logger.error("DNS lookup failed: url=%s", request.url)
-
+    elif failure.check(TimeoutError, TCPTimedOutError):
+        error_type = "timeout"
+        stats.inc_value("errors/timeout")
     else:
-        stats.inc_value("errors/unexpected_request")
-        self.logger.error(
-            "Unexpected request failure: url=%s error=%r",
-            request.url,
-            failure.value,
-        )
+        error_type = type(failure.value).__name__
+        stats.inc_value(f"errors/request/{error_type}")
+
+    spider.logger.error(
+        "Document request failed: identifier=%s url=%s "
+        "error_type=%s detail=%s",
+        identifier,
+        request.url,
+        error_type,
+        failure.getErrorMessage(),
+    )

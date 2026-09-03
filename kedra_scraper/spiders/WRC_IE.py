@@ -7,11 +7,9 @@ from urllib.parse import urlsplit
 
 import scrapy
 from pypdf import PdfReader
-from scrapy.spidermiddlewares.httperror import HttpError
-from twisted.internet.error import DNSLookupError, TCPTimedOutError, TimeoutError
-from twisted.python.failure import Failure
 
 from kedra_scraper.items import KedraScraperItem
+from kedra_scraper.utils import handle_request_error as record_request_error
 
 
 class WRC_IE_Spider(scrapy.Spider):
@@ -305,36 +303,9 @@ class WRC_IE_Spider(scrapy.Spider):
             description=description,
         )
 
-    def handle_request_error(self, failure: Failure) -> None:
-        """Record a document request that ultimately failed."""
-        request = failure.request
-        identifier = request.cb_kwargs.get("identifier", "unknown")
-        stats = self.crawler.stats
-
-        stats.inc_value("documents/request_failed")
-
-        if failure.check(HttpError):
-            status = failure.value.response.status
-            error_type = f"http_{status}"
-            stats.inc_value(f"errors/{error_type}")
-        elif failure.check(DNSLookupError):
-            error_type = "dns"
-            stats.inc_value("errors/dns")
-        elif failure.check(TimeoutError, TCPTimedOutError):
-            error_type = "timeout"
-            stats.inc_value("errors/timeout")
-        else:
-            error_type = type(failure.value).__name__
-            stats.inc_value(f"errors/request/{error_type}")
-
-        self.logger.error(
-            "Document request failed: identifier=%s url=%s "
-            "error_type=%s detail=%s",
-            identifier,
-            request.url,
-            error_type,
-            failure.getErrorMessage(),
-        )
+    def handle_request_error(self, failure) -> None:
+        """Delegate request-failure recording to the shared utility."""
+        record_request_error(self, failure)
 
     def closed(self, reason: str) -> None:
         """Log a reconciliation summary after all requests and items finish."""
