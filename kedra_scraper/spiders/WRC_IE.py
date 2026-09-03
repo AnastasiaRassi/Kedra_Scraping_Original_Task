@@ -2,17 +2,18 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 from io import BytesIO
-from typing import Iterator
+from typing import Iterator, Literal
 from urllib.parse import urlencode, urlsplit
 
 import scrapy
 from pypdf import PdfReader
 
 from kedra_scraper.config import WRCSourceConfig, load_wrc_source_config
-from kedra_scraper.items import KedraScraperItem
+from kedra_scraper.items import KedraRawDocumentItem, KedraScraperItem
 from kedra_scraper.utils import (
     handle_request_error as record_request_error,
     hash_document,
+    write_crawl_summary,
 )
 
 
@@ -49,9 +50,12 @@ class WRC_IE_Spider(scrapy.Spider):
         self.search_url = self.source_config.search_url
         self.source = self.source_config.source
         self.partition_months = settings.getint("SCRAPE_PARTITION_MONTHS")
+        self.scrape_mode = settings.get("SCRAPE_MODE")
 
         if self.partition_months < 1:
             raise ValueError("SCRAPE_PARTITION_MONTHS must be at least 1")
+        if self.scrape_mode not in {"full", "ingestion"}:
+            raise ValueError("SCRAPE_MODE must be either 'full' or 'ingestion'")
 
         start_value = (
             self._start_date_argument or settings.get("SCRAPE_START_DATE")
@@ -81,6 +85,7 @@ class WRC_IE_Spider(scrapy.Spider):
         yield scrapy.Request(
             url=url,
             callback=self.start_partition_searches,
+            errback=self.handle_search_request_error,
         )
 
     def start_partition_searches(self, response):
@@ -110,6 +115,7 @@ class WRC_IE_Spider(scrapy.Spider):
                     formxpath=form.xpath,
                     formdata=form_data,
                     callback=self.parse,
+                    errback=self.handle_search_request_error,
                     cb_kwargs={
                         "category": category_config.name,
                         "partition_date": partition_date,
@@ -179,6 +185,7 @@ class WRC_IE_Spider(scrapy.Spider):
             yield response.follow(
                 next_page,
                 callback=self.parse,
+                errback=self.handle_search_request_error,
                 cb_kwargs={
                     "category": category,
                     "partition_date": partition_date,
@@ -230,6 +237,21 @@ class WRC_IE_Spider(scrapy.Spider):
                     "description": description,
                     "landing_url": landing_url,
                 },
+            )
+            return
+
+        if self.scrape_mode == "ingestion":
+            self.crawler.stats.inc_value("documents/html_ingested")
+            yield self._raw_item(
+                response=response,
+                title=title,
+                identifier=identifier,
+                published_date=published_date,
+                partition_date=partition_date,
+                category=category,
+                description=description,
+                landing_url=landing_url,
+                source_format="html",
             )
             return
 
@@ -296,6 +318,21 @@ class WRC_IE_Spider(scrapy.Spider):
         landing_url: str,
     ):
         """Extract text from a PDF document."""
+        if self.scrape_mode == "ingestion":
+            self.crawler.stats.inc_value("documents/pdf_ingested")
+            yield self._raw_item(
+                response=response,
+                title=title,
+                identifier=identifier,
+                published_date=published_date,
+                partition_date=partition_date,
+                category=category,
+                description=description,
+                landing_url=landing_url,
+                source_format="pdf",
+            )
+            return
+
         content = ""
 
         try:
@@ -349,6 +386,32 @@ class WRC_IE_Spider(scrapy.Spider):
             description=description,
         )
 
+    def _raw_item(
+        self,
+        response,
+        title: str,
+        identifier: str | None,
+        published_date: str,
+        partition_date: str,
+        category: str,
+        description: str | None,
+        landing_url: str,
+        source_format: Literal["html", "pdf"],
+    ) -> KedraRawDocumentItem:
+        return KedraRawDocumentItem(
+            title=title,
+            published_date=published_date,
+            partition_date=partition_date,
+            identifier=identifier,
+            source=self.source,
+            category=category,
+            source_format=source_format,
+            doc_url=response.url,
+            landing_url=landing_url,
+            raw_content=response.body,
+            description=description,
+        )
+
     def _hash_content(
         self,
         content: str,
@@ -371,6 +434,10 @@ class WRC_IE_Spider(scrapy.Spider):
         """Delegate request-failure recording to the shared utility."""
         record_request_error(self, failure)
 
+    def handle_search_request_error(self, failure) -> None:
+        """Record a search or pagination request after retries are exhausted."""
+        record_request_error(self, failure, request_kind="search")
+
     def closed(self, reason: str) -> None:
         """Log a reconciliation summary after all requests and items finish."""
         stats = self.crawler.stats
@@ -378,6 +445,7 @@ class WRC_IE_Spider(scrapy.Spider):
         expected = stats.get_value("documents/expected", 0)
         scraped = stats.get_value("item_scraped_count", 0)
         request_failed = stats.get_value("documents/request_failed", 0)
+        search_request_failed = stats.get_value("search/request_failed", 0)
         incomplete_results = stats.get_value(
             "documents/incomplete_result",
             0,
@@ -402,14 +470,87 @@ class WRC_IE_Spider(scrapy.Spider):
         )
         unexplained_missing = max(missing - explained_missing, 0)
 
+        persistence_errors = sum(
+            stats.get_value(key, 0)
+            for key in (
+                "errors/persistence_identity",
+                "errors/minio_payload",
+                "errors/minio_write",
+                "errors/mongodb_payload",
+                "errors/mongodb_write",
+            )
+        )
+
+        summary = {
+            "reason": reason,
+            "expected": expected,
+            "scraped": scraped,
+            "request_failed": request_failed,
+            "search_request_failed": search_request_failed,
+            "extraction_failed": extraction_failed,
+            "incomplete_results": incomplete_results,
+            "dropped": dropped,
+            "missing": missing,
+            "unexplained_missing": unexplained_missing,
+            "persistence_errors": persistence_errors,
+            "html_extracted": stats.get_value(
+                "documents/html_extracted",
+                0,
+            ),
+            "pdf_extracted": stats.get_value(
+                "documents/pdf_extracted",
+                0,
+            ),
+            "html_ingested": stats.get_value(
+                "documents/html_ingested",
+                0,
+            ),
+            "pdf_ingested": stats.get_value(
+                "documents/pdf_ingested",
+                0,
+            ),
+            "minio_uploaded": stats.get_value(
+                "persistence/minio_uploaded",
+                0,
+            ),
+            "minio_unchanged": stats.get_value(
+                "persistence/minio_unchanged",
+                0,
+            ),
+            "mongodb_inserted": stats.get_value(
+                "persistence/mongodb_inserted",
+                0,
+            ),
+            "mongodb_updated": stats.get_value(
+                "persistence/mongodb_updated",
+                0,
+            ),
+            "mongodb_unchanged": stats.get_value(
+                "persistence/mongodb_unchanged",
+                0,
+            ),
+        }
+
+        summary_path = self.settings.get("CRAWL_SUMMARY_PATH")
+        if summary_path:
+            try:
+                write_crawl_summary(summary_path, summary)
+            except (OSError, TypeError, ValueError):
+                self.logger.exception(
+                    "Could not write crawl summary to %s",
+                    summary_path,
+                )
+
         self.logger.info(
             "CRAWL SUMMARY: reason=%s expected=%d scraped=%d "
-            "request_failed=%d extraction_failed=%d "
+            "request_failed=%d search_request_failed=%d "
+            "extraction_failed=%d "
             "incomplete_results=%d dropped=%d missing=%d unexplained=%d",
             reason,
             expected,
             scraped,
             request_failed,
+            search_request_failed,
             extraction_failed,
             incomplete_results,
             dropped,

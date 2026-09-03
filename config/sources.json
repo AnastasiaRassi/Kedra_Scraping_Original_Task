@@ -1,0 +1,15 @@
+{
+  "sources": {
+    "wrc_ie": {
+      "spider": "WRC_IE",
+      "source": "https://www.workplacerelations.ie",
+      "spider_settings": {
+        "WRC_CONFIG_PATH": "config/wrc.json"
+      },
+      "html_content_selectors": [
+        "h1.page-title + div.content",
+        "div.col-sm-9 > div.content"
+      ]
+    }
+  }
+}

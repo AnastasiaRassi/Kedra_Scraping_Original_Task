@@ -1,32 +1,51 @@
 # Kedra Scraping Pipeline
 
-A Scrapy-based pipeline for collecting legal documents and normalising them into a shared document schema. The first implemented source is the Irish Workplace Relations Commission (WRC).
+A Scrapy and Dagster pipeline for collecting legal documents from multiple
+sources, preserving each original file, and scraping its text into a shared
+MongoDB document schema. The Irish Workplace Relations Commission (WRC) is the
+first implemented source.
 
 ## Current status
 
-The WRC spider currently supports:
+The project currently supports:
 
-- Required `start_date` and `end_date` crawl arguments.
-- Monthly partitions between the requested dates.
-- Separate searches across all four WRC Body categories.
-- Pagination through every search-results page.
-- HTML case-document extraction.
-- Detection and extraction of PDF-backed cases.
-- Automatic retries, timeouts and AutoThrottle.
-- Request and extraction failure accounting.
-- JSON Lines export for local testing.
-- A shared item schema with flexible source-specific metadata.
-- Deterministic SHA-256 hashes of extracted document content.
-- Optional idempotent persistence to MinIO and MongoDB.
+- Required `start_date` and `end_date` crawl inputs.
+- Configurable calendar-month partitioning.
+- WRC searches across all four Body categories.
+- Search-result pagination.
+- HTML documents, direct PDFs, and HTML wrappers containing PDF downloads.
+- A shared raw-item and scraped-item contract.
+- Source-specific metadata through `source_metadata`.
+- SHA-256 hashes for both original bytes and scraped text.
+- Idempotent MinIO and MongoDB persistence.
+- Source/month Dagster partitions.
+- Separate `raw_documents` and `scraped_documents` Dagster assets.
+- Scrapy request retries plus Dagster task retries.
+- Machine-readable crawl reconciliation summaries.
 
-Persistence is disabled by default so local JSON test crawls do not require either service. When enabled, original document bytes are stored in MinIO before the searchable record is upserted into MongoDB.
+Persistence is disabled by default so small JSON test crawls do not require
+storage services.
 
-## Supported WRC categories
+## Architecture
 
-- Employment Appeals Tribunal
-- Equality Tribunal
-- Labour Court
-- Workplace Relations Commission
+Dagster orchestrates two dependent assets for each `source` and calendar
+`date` partition:
+
+1. `raw_documents` runs the configured Scrapy spider in ingestion mode. It
+   stores the original HTML/PDF bytes in MinIO and upserts source metadata in
+   MongoDB with `scraping_status="pending"`.
+2. `scraped_documents` runs only after `raw_documents` succeeds. It reads the
+   original MinIO objects, extracts text according to their format and source
+   rules, and updates the MongoDB records with `content`, `content_hash`, and
+   `scraping_status="completed"`.
+
+This is ingestion followed by scraping. The second asset is deliberately
+named `scraped_documents`; its responsibility is document text extraction.
+
+The Dagster definitions are source-agnostic. `config/sources.json` maps a
+source key to its spider, spider settings, canonical source URL, and HTML
+content selectors. The source-specific crawling rules remain with each spider
+and its configuration file.
 
 ## Installation
 
@@ -41,61 +60,19 @@ pip install -r requirements.txt
 
 Run commands from the repository root, where `scrapy.cfg` is located.
 
-
-To configure persistence, copy the example environment file and edit its local credentials:
+Copy the environment template:
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-Leave `PERSISTENCE_ENABLED=false` for JSON-only test crawls. Set it to `true` only when both MongoDB and MinIO are running.
+The real `.env` is ignored by Git. Do not commit it.
 
+## Local storage services
 
-## Configuration
-
-Runtime configuration is loaded from the repository-root `.env` file. Copy `.env.example` to `.env`; the real `.env` is ignored by Git and must not be committed.
-
-Date inputs can be supplied either as spider arguments or environment variables. Spider arguments take precedence:
-
-```powershell
-scrapy crawl WRC_IE -a start_date=01-01-2025 -a end_date=31-01-2025
-```
-
-```env
-SCRAPE_START_DATE=01-01-2025
-SCRAPE_END_DATE=31-01-2025
-```
-
-The main environment groups are:
-
-| Area | Variables |
-| --- | --- |
-| Crawl period | `SCRAPE_START_DATE`, `SCRAPE_END_DATE`, `SCRAPE_PARTITION_MONTHS` |
-| Source config | `WRC_CONFIG_PATH` |
-| Request identity | `SCRAPY_USER_AGENT`, `SCRAPY_ACCEPT_HEADER`, `SCRAPY_ACCEPT_LANGUAGE` |
-| Request behavior | `SCRAPY_ROBOTSTXT_OBEY`, `SCRAPY_COOKIES_ENABLED`, `SCRAPY_TELNETCONSOLE_ENABLED` |
-| Concurrency | `SCRAPY_CONCURRENT_REQUESTS`, `SCRAPY_CONCURRENT_REQUESTS_PER_DOMAIN`, `SCRAPY_DOWNLOAD_DELAY`, `SCRAPY_RANDOMIZE_DOWNLOAD_DELAY` |
-| AutoThrottle | `SCRAPY_AUTOTHROTTLE_ENABLED`, `SCRAPY_AUTOTHROTTLE_START_DELAY`, `SCRAPY_AUTOTHROTTLE_MAX_DELAY`, `SCRAPY_AUTOTHROTTLE_TARGET_CONCURRENCY`, `SCRAPY_AUTOTHROTTLE_DEBUG` |
-| Resilience | `SCRAPY_DOWNLOAD_TIMEOUT`, `SCRAPY_RETRY_TIMES` |
-| Logging/export | `SCRAPY_LOG_LEVEL`, `SCRAPY_FEED_EXPORT_ENCODING` |
-| MongoDB | `MONGO_URI`, `MONGO_DATABASE`, `MONGO_COLLECTION`, `MONGO_SERVER_SELECTION_TIMEOUT_MS` |
-| MinIO | `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `MINIO_SECURE`, `MINIO_BUCKET`, `MINIO_PREFIX` |
-| Docker | Image, container, bind-host, port and data-path variables listed in `.env.example` |
-
-All supported variables and local-development defaults are listed in `.env.example`. Numeric and Boolean settings are validated when Scrapy loads; malformed values fail early with the variable name.
-
-Website-specific rules live in `config/wrc.json`, including:
-
-- Source and search URLs.
-- Allowed domains and initial search query.
-- ASP.NET form fields.
-- WRC Body categories and values.
-- Result, pagination, HTML and PDF selectors.
-- Accepted input, form and publication-date formats.
-
-Set `WRC_CONFIG_PATH` to use a different JSON configuration without changing the spider.
-
-The storage containers also consume `.env`. Start them with:
+MongoDB and MinIO run as Docker containers. The credentials in `.env` are
+used both by Docker Compose when the containers are first created and by the
+Python application when it connects.
 
 ```powershell
 docker compose config
@@ -103,23 +80,88 @@ docker compose up -d
 docker compose ps
 ```
 
-`MONGO_DATA_PATH` and `MINIO_DATA_PATH` can be Docker volume names or host paths. The defaults use persistent named volumes.
+The default endpoints are:
 
-## Running the WRC spider
+- MongoDB: `localhost:27017`
+- MinIO API: `localhost:9000`
+- MinIO console: `http://localhost:9001`
 
-The spider accepts dates in either `DD-MM-YYYY` or `YYYY-MM-DD` format.
+`MONGO_DATA_PATH` and `MINIO_DATA_PATH` can be Docker volume names or host
+paths. The defaults use persistent named volumes. If MongoDB was already
+initialised, changing its username or password in `.env` does not rewrite the
+credentials stored in the existing volume.
+
+## Configuration
+
+All connection strings, storage locations, partition settings, crawl tuning,
+and Dagster retry settings are configurable through `.env` or JSON source
+configuration. No local credentials belong in source code.
+
+| Area | Main variables |
+| --- | --- |
+| Storage switch | `PERSISTENCE_ENABLED` |
+| MongoDB | `MONGO_URI`, `MONGO_DATABASE`, `MONGO_COLLECTION`, `MONGO_SERVER_SELECTION_TIMEOUT_MS` |
+| MinIO | `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `MINIO_SECURE`, `MINIO_BUCKET`, `MINIO_PREFIX` |
+| Docker | Image, container, bind-host, port, credential, and data-path variables in `.env.example` |
+| Direct crawl period | `SCRAPE_START_DATE`, `SCRAPE_END_DATE`, `SCRAPE_PARTITION_MONTHS` |
+| Source rules | `WRC_CONFIG_PATH`, `SOURCE_REGISTRY_PATH` |
+| Request behavior | `SCRAPY_ROBOTSTXT_OBEY`, `SCRAPY_COOKIES_ENABLED`, `SCRAPY_DOWNLOAD_TIMEOUT`, `SCRAPY_RETRY_TIMES` |
+| Concurrency | `SCRAPY_CONCURRENT_REQUESTS`, `SCRAPY_CONCURRENT_REQUESTS_PER_DOMAIN`, `SCRAPY_DOWNLOAD_DELAY` |
+| AutoThrottle | `SCRAPY_AUTOTHROTTLE_ENABLED`, `SCRAPY_AUTOTHROTTLE_START_DELAY`, `SCRAPY_AUTOTHROTTLE_MAX_DELAY`, `SCRAPY_AUTOTHROTTLE_TARGET_CONCURRENCY` |
+| Dagster partitions | `DAGSTER_PARTITION_START_DATE`, `DAGSTER_PARTITION_END_DATE`, `DAGSTER_PARTITION_TIMEZONE`, `DAGSTER_PARTITION_END_OFFSET` |
+| Dagster retries | `DAGSTER_CRAWL_MAX_RETRIES`, `DAGSTER_CRAWL_RETRY_DELAY_SECONDS`, `DAGSTER_CRAWL_TIMEOUT_SECONDS` |
+| Dagster validation | `DAGSTER_ALLOWED_CLOSE_REASONS`, `DAGSTER_MAX_REQUEST_FAILURES`, `DAGSTER_MAX_PERSISTENCE_ERRORS`, `DAGSTER_MAX_UNEXPLAINED_MISSING` |
+| Schedule | `DAGSTER_SCHEDULE_CRON` |
+
+All supported variables and development defaults are listed in
+`.env.example`. Numeric and Boolean values are validated early.
+
+### Source registry
+
+`config/sources.json` is the orchestration registry. Its keys become Dagster's
+`source` partitions:
+
+```json
+{
+  "sources": {
+    "wrc_ie": {
+      "spider": "WRC_IE",
+      "source": "https://www.workplacerelations.ie",
+      "spider_settings": {
+        "WRC_CONFIG_PATH": "config/wrc.json"
+      },
+      "html_content_selectors": [
+        "h1.page-title + div.content",
+        "div.col-sm-9 > div.content"
+      ]
+    }
+  }
+}
+```
+
+To add another website, implement a source spider that accepts
+`start_date`/`end_date`, yields the shared raw item in ingestion mode, and
+writes the shared crawl-summary counters. Then add its entry to the registry.
+The Dagster assets do not need website-specific branches.
+
+## Run a direct Scrapy test
+
+Direct crawls default to `SCRAPE_MODE=full`: the spider downloads each file,
+extracts its text, and yields a complete `KedraScraperItem` in one run.
+
+The WRC spider accepts `DD-MM-YYYY` or `YYYY-MM-DD` dates:
 
 ```powershell
 scrapy crawl WRC_IE `
   -a start_date=01-01-2008 `
   -a end_date=31-03-2008 `
-  -O wrc_old_test.jsonl `
+  -O wrc_test.jsonl `
   -s LOG_LEVEL=INFO
 ```
 
-`-O` overwrites the output file. Use `-o` only when intentionally appending to an existing feed.
+`-O` overwrites the output file. Use `-o` only when intentionally appending.
 
-For a bounded test crawl:
+For a bounded test:
 
 ```powershell
 scrapy crawl WRC_IE `
@@ -130,106 +172,121 @@ scrapy crawl WRC_IE `
   -s CLOSESPIDER_ITEMCOUNT=100
 ```
 
-Because several requests may already be in flight, `CLOSESPIDER_ITEMCOUNT=100` can produce slightly more than 100 items before shutdown completes.
+Several requests may already be in flight, so a limit of 100 can produce
+slightly more than 100 items before the spider stops.
+
+## Run with Dagster
+
+Dagster requires persistence because the assets communicate through MongoDB
+and MinIO. In `.env`, set:
+
+```env
+PERSISTENCE_ENABLED=true
+```
+
+Start the storage containers, then start Dagster:
+
+```powershell
+docker compose up -d
+New-Item -ItemType Directory -Force .dagster
+$env:DAGSTER_HOME = (Resolve-Path .dagster).Path
+dagster dev -m kedra_scraper.definitions
+```
+
+Open `http://127.0.0.1:3000`. Select the `document_pipeline_job`, choose a
+`source`/`date` partition, and materialise it. Dagster enforces
+`raw_documents -> scraped_documents` for the same partition.
+
+The included schedule launches the latest completed month for every source in
+the registry. Its cron expression and timezone come from `.env`; enable the
+schedule in the Dagster UI when ready.
+
+Dagster always forces the spider subprocess to `SCRAPE_MODE=ingestion`, so text
+extraction happens in the separate `scraped_documents` asset rather than in
+the spider subprocess.
 
 ## Partitioning
 
-The requested interval is split into configurable month-based partitions. `SCRAPE_PARTITION_MONTHS=1` produces monthly partitions. For example:
+Direct Scrapy runs split their requested interval according to
+`SCRAPE_PARTITION_MONTHS`. A value of `1` creates calendar-month partitions:
 
 ```text
-start_date: 01-01-2024
-end_date:   31-03-2024
-
-partitions:
 2024-01-01 to 2024-01-31
 2024-02-01 to 2024-02-29
 2024-03-01 to 2024-03-31
 ```
 
-Each record receives the first date of its partition as `partition_date`. Increase `SCRAPE_PARTITION_MONTHS` to group multiple calendar months into one partition.
+Every item receives the first date of its partition as `partition_date`.
 
-For every partition, the spider submits one search per configured WRC Body category. These searches can run concurrently while remaining subject to the configured per-domain concurrency and AutoThrottle limits.
+Dagster uses an explicit two-dimensional partition key:
 
-## Document flow
+- `source`: a key from `config/sources.json`
+- `date`: the first day of a calendar month
 
-A search result may point directly to an HTML document, directly to a PDF, or to an HTML wrapper containing a PDF download.
+That lets different source/month combinations run independently and, when
+executor capacity allows, concurrently.
 
-```text
-search page
-  -> case URL
-     -> HTML content -> yield HTML item
-     -> a.download PDF link -> request PDF -> yield PDF item
-```
+## WRC document discovery
 
-Older WRC records can use HTML wrapper pages. The spider specifically selects:
+A WRC result may point to an HTML document, directly to a PDF, or to an HTML
+wrapper containing the actual PDF download. Wrapper PDFs are selected with:
 
 ```css
 div.related-item a.download::attr(href)
 ```
 
-This prevents unrelated site-wide PDFs, such as the Cookie Policy, from being mistaken for case documents.
+Using the scoped `.download` selector prevents unrelated site-wide PDFs, such
+as the Cookie Policy, from being mistaken for case documents.
 
-PDF text is currently using `pypdf`. Image-only scanned PDFs currently require future OCR support.
+PDF text extraction uses `pypdf`. Image-only scanned PDFs are marked as
+scraping failures until OCR support is added.
 
-## Scraped item schema
+## Shared schemas
 
-Every source-specific spider maps its data into the same item:
+The raw ingestion item contains discovery metadata and the original response
+bytes:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `title` | `str` | Combined `identifier_description`, falling back to whichever component exists |
-| `published_date` | `str` | Normalised publication date in `YYYY-MM-DD` form |
-| `partition_date` | `str` | First date of the monthly crawl partition |
-| `content` | `str` | Extracted HTML or PDF text |
-| `content_hash` | `str` | SHA-256 hash of the extracted content |
-| `identifier` | `str \| None` | Source-provided document identifier, when available |
-| `source` | `str` | Source website |
-| `category` | `str` | Source collection or WRC Body category |
-| `source_format` | `"html" \| "pdf"` | Format from which content was extracted |
-| `doc_url` | `str` | Final HTML or PDF document URL |
-| `landing_url` | `str` | Stable case URL discovered in the search results |
-| `raw_content` | `bytes` | Internal original response bytes; removed by the first pipeline before export |
-| `description` | `str \| None` | Source-provided record description |
-| `source_metadata` | `dict[str, Any]` | Additional useful fields unique to a source |
+| `title` | `str` | Combined `identifier_description`, falling back to whichever value exists |
+| `published_date` | `str` | Normalised publication date |
+| `partition_date` | `str` | First date of the crawl partition |
+| `identifier` | `str \| None` | Source identifier when available |
+| `source` | `str` | Canonical source website |
+| `category` | `str` | Source collection/category |
+| `source_format` | `"html" \| "pdf"` | Original document format |
+| `doc_url` | `str` | Final HTML or PDF URL |
+| `landing_url` | `str` | Stable result URL used for identity |
+| `raw_content` | `bytes` | Original bytes consumed by the MinIO pipeline |
+| `description` | `str \| None` | Source description when available |
+| `source_metadata` | `dict[str, Any]` | Extra source-specific metadata |
 
-For example:
+The scraped schema adds:
 
-```json
-{
-  "title": "TE54/2007_CASE DESCRIPTION",
-  "published_date": "2008-02-01",
-  "partition_date": "2008-02-01",
-  "content": "Extracted legal document text...",
-  "content_hash": "64-character SHA-256 hexadecimal digest",
-  "identifier": "TE54/2007",
-  "source": "https://www.workplacerelations.ie",
-  "category": "Employment Appeals Tribunal",
-  "source_format": "pdf",
-  "doc_url": "https://www.workplacerelations.ie/en/eat_import/...pdf",
-  "landing_url": "https://www.workplacerelations.ie/en/cases/...html",
-  "description": "CASE DESCRIPTION",
-  "source_metadata": {}
-}
-```
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `content` | `str` | Extracted HTML/PDF text |
+| `content_hash` | `str` | SHA-256 of the scraped text encoded as UTF-8 |
 
-`source_metadata` defaults to an empty dictionary, so existing spiders remain compatible. Future sources can preserve fields such as judges, legislation, hearing dates or court names without changing the common top-level contract.
+`source_metadata` lets future spiders retain useful fields such as judges,
+legislation, hearing dates, or court names without changing the common fields.
 
-`content_hash` is calculated from the exact extracted `content` encoded as UTF-8. It represents the logical text of both HTML and PDF documents. The MinIO pipeline separately calculates `blob.sha256` from the original response bytes.
+## Persistence and idempotency
 
-## Persistence
+The Scrapy item pipelines execute in order:
 
-Persistence is implemented as two ordered item pipelines:
+1. `MinioPipeline` builds `record_key`, stores original bytes, and attaches the
+   blob metadata.
+2. `MongoPipeline` upserts the record and its MinIO reference.
 
-1. `MinioPipeline` builds the stable `record_key`, removes the internal raw bytes from the exported item, and stores the original HTML/PDF file.
-2. `MongoPipeline` upserts the document metadata, extracted text, hashes and MinIO reference.
-
-The identity is:
+The stable identity is:
 
 ```text
 record_key = SHA256(source + "|" + landing_url)
 ```
 
-The source identifier is not used as the unique database key because identifiers can be missing or duplicated. MongoDB creates a unique index on `record_key`.
+Identifiers are not database keys because sources can omit or duplicate them.
+MongoDB has a unique index on `record_key`.
 
 MinIO object names are deterministic:
 
@@ -238,74 +295,63 @@ documents/{record_key}.html
 documents/{record_key}.pdf
 ```
 
-On repeated crawls:
+Reruns are safe:
 
-- An unchanged MinIO blob is not uploaded again.
-- MongoDB updates the existing row rather than inserting a duplicate.
-- `last_seen_at` records the latest successful crawl.
-- `content_updated_at` changes only when extracted content or the original blob changes.
-- A changed source document replaces the deterministic MinIO object and updates MongoDB.
+- Unchanged MinIO bytes are not uploaded again.
+- MongoDB upserts rather than inserting a duplicate.
+- Raw records become `pending` only when new or when their blob changes.
+- `scraped_documents` skips a completed record when its scraped blob hash still
+  matches the current raw blob.
+- Changed originals clear stale scraped fields and are scraped again.
+- `last_seen_at`, `ingested_at`, `scraped_at`, and `content_updated_at` preserve
+  lifecycle timing.
 
-If persistence is enabled but either service cannot be reached, the crawl fails during startup. If an individual upload or upsert fails, that item is dropped, logged and counted rather than being reported as successfully persisted.
+## Retries and failure handling
 
-## Crawl statistics and failures
+There are two retry layers:
 
-The spider records statistics including:
+- Scrapy retries eligible individual HTTP requests according to
+  `SCRAPY_RETRY_TIMES` and `SCRAPY_DOWNLOAD_TIMEOUT`.
+- Dagster retries an entire failed source/month asset according to
+  `DAGSTER_CRAWL_MAX_RETRIES` and
+  `DAGSTER_CRAWL_RETRY_DELAY_SECONDS`, with exponential backoff.
 
-- `documents/expected`
-- `documents/scheduled`
-- `documents/html_extracted`
-- `documents/pdf_extracted`
-- `documents/request_failed`
-- `errors/html_parsing`
-- `errors/html_empty`
-- `errors/pdf_parsing`
-- `errors/pdf_empty`
-- `errors/document_hashing`
-- `errors/persistence_identity`
-- `errors/minio_payload`
-- `errors/minio_write`
-- `errors/mongodb_payload`
-- `errors/mongodb_write`
+The raw asset reads the spider's JSON crawl summary and rejects a partition
+when its close reason, final request failures, persistence failures, or
+unexplained missing count exceed configured limits. Because storage is
+idempotent, retrying the whole partition is safe.
 
-The final reconciliation summary compares discovered search results with yielded items:
+Operational scraping failures such as unavailable MongoDB/MinIO fail the
+Dagster asset and are retried. A deterministic per-document extraction error
+is stored on that record as `scraping_status="failed"` with `scraping_error`;
+the rest of the partition continues. Set
+`DAGSTER_FAIL_ON_SCRAPING_ERRORS=true` to mark that partition failed after all
+documents have been attempted.
 
-```text
-CRAWL SUMMARY:
-expected=420
-scraped=419
-request_failed=0
-extraction_failed=1
-missing=1
-unexplained=0
-```
+Subprocess output is captured so legal-document text does not flood the
+Dagster logs. On failure, only the configured tail is emitted.
 
-`unexplained=0` means every missing item is accounted for by a logged failure. Search pages, pagination pages, HTML wrappers and `robots.txt` all count as crawled responses but do not necessarily produce items, so the response count is normally higher than the item count.
+## Verified WRC crawl
 
-### Verified January-March 2008 test
-
-A complete test over `01-01-2008` through `31-03-2008` produced:
+A complete direct test over `01-01-2008` through `31-03-2008` produced:
 
 - 420 discovered records
-- 419 extracted items
+- 419 scraped items
 - 159 HTML documents
 - 260 PDF documents
 - 0 final request failures
-- 1 empty duplicate landing page for `PW18/2007`; the separate PDF-backed `PW18/2007` URL was extracted successfully
+- 1 empty duplicate landing page for `PW18/2007`
 - 0 unexplained missing records
 
-WRC exposes two distinct landing-page URLs named `PW18/2007`. `pw18_20071.html` is an HTML wrapper with a downloadable PDF and is extracted successfully. `pw18_2007.html` contains neither HTML document content nor a PDF download link, so only that empty duplicate URL is recorded as an extraction failure instead of yielding an empty item.
-
-A source identifier must therefore not be assumed to be unique. The future persistence layer should use a stable source URL or generated record key for idempotency rather than relying only on `source + identifier`.
-
-## Request settings
-
-Request limits, delays, AutoThrottle, timeouts, retries, headers, cookies, robots.txt behavior and logging are environment-backed. The checked-in `.env.example` contains the conservative defaults used during WRC validation. AutoThrottle still adapts timing to observed latency, while configured concurrency values remain upper bounds.
+WRC exposes two different landing URLs named `PW18/2007`.
+`pw18_20071.html` contains a downloadable PDF and succeeds;
+`pw18_2007.html` contains neither document content nor a PDF download. This is
+why the URL-based `record_key` is safer than the source identifier.
 
 ## Planned work
 
-- Replace the deprecated `FormRequest.from_response()` flow with `form2request`.
-- Populate source-specific metadata.
-- Add OCR handling for scanned PDFs.
-- Add automated parser and persistence integration tests.
-- Integrate a production secret manager for deployed credentials.
+- Replace deprecated `FormRequest.from_response()` usage with `form2request`.
+- Populate more source-specific metadata.
+- Add OCR for scanned PDFs.
+- Add automated parser, MinIO, MongoDB, and Dagster integration tests.
+- Add a production secret manager for deployed credentials.

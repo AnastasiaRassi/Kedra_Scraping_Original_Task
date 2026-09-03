@@ -51,6 +51,63 @@ class WRCSourceConfig:
     form_date_format: str
 
 
+@dataclass(frozen=True)
+class SourceRegistryEntry:
+    key: str
+    spider: str
+    source: str
+    spider_settings: dict[str, str]
+    html_content_selectors: tuple[str, ...]
+
+
+def load_source_registry(value: str) -> dict[str, SourceRegistryEntry]:
+    """Load the source registry used by generic Dagster assets."""
+    path = resolve_project_path(value)
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise ValueError(f"Source registry does not exist: {path}") from exc
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Cannot read source registry {path}: {exc}") from exc
+
+    root = _mapping(raw, "root")
+    sources_raw = _mapping(root.get("sources"), "sources")
+    if not sources_raw:
+        raise ValueError("sources must contain at least one configured source")
+
+    registry: dict[str, SourceRegistryEntry] = {}
+    for key, item in sources_raw.items():
+        source_key = _non_empty_string(key, "source key")
+        context = f"sources.{source_key}"
+        source = _mapping(item, context)
+        settings_raw = _mapping(
+            source.get("spider_settings", {}),
+            f"{context}.spider_settings",
+        )
+        spider_settings = {
+            _non_empty_string(
+                name,
+                f"{context}.spider_settings key",
+            ): _non_empty_string(
+                setting,
+                f"{context}.spider_settings.{name}",
+            )
+            for name, setting in settings_raw.items()
+        }
+        registry[source_key] = SourceRegistryEntry(
+            key=source_key,
+            spider=_text(source, "spider", context),
+            source=_text(source, "source", context),
+            spider_settings=spider_settings,
+            html_content_selectors=_string_tuple(
+                source.get("html_content_selectors"),
+                f"{context}.html_content_selectors",
+            ),
+        )
+
+    return registry
+
+
 def resolve_project_path(value: str) -> Path:
     """Resolve config paths consistently from the repository root."""
     path = Path(value).expanduser()

@@ -70,6 +70,10 @@ SCRAPE_PARTITION_MONTHS = _env_int(
     1,
     minimum=1,
 )
+SCRAPE_MODE = os.getenv("SCRAPE_MODE", "full").strip().lower()
+if SCRAPE_MODE not in {"full", "ingestion"}:
+    raise ValueError("SCRAPE_MODE must be either 'full' or 'ingestion'")
+CRAWL_SUMMARY_PATH = os.getenv("CRAWL_SUMMARY_PATH")
 
 # Request identity, output and protocol behaviour.
 USER_AGENT = os.getenv("SCRAPY_USER_AGENT", "KedraScraper/1.0")

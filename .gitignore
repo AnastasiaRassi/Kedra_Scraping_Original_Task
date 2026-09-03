@@ -1,6 +1,7 @@
 .venv/
 .env
 .data/
+.dagster/
 __pycache__/
 *.py[cod]
 *.jsonl
