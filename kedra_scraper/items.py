@@ -13,6 +13,7 @@ class KedraScraperItem:
     published_date: str
     partition_date: str
     content: str
+    content_hash: str
     identifier: str | None
     source: str
     category: str
