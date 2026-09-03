@@ -1,0 +1,65 @@
+{
+  "source": "https://www.workplacerelations.ie",
+  "search_url": "https://www.workplacerelations.ie/en/search/",
+  "allowed_domains": [
+    "workplacerelations.ie"
+  ],
+  "search_query": {
+    "advance": "true",
+    "decisions": "1"
+  },
+  "form": {
+    "xpath": "(//form)[1]",
+    "start_date_field": "ctl00$ContentPlaceHolder_Main$TextBox2",
+    "end_date_field": "ctl00$ContentPlaceHolder_Main$TextBox3",
+    "submit_field": "ctl00$ContentPlaceHolder_Main$refine_btn",
+    "submit_value": ""
+  },
+  "body_categories": [
+    {
+      "name": "Employment Appeals Tribunal",
+      "form_field": "ctl00$ContentPlaceHolder_Main$CB2$CB2_0",
+      "form_value": "2"
+    },
+    {
+      "name": "Equality Tribunal",
+      "form_field": "ctl00$ContentPlaceHolder_Main$CB2$CB2_1",
+      "form_value": "1"
+    },
+    {
+      "name": "Labour Court",
+      "form_field": "ctl00$ContentPlaceHolder_Main$CB2$CB2_2",
+      "form_value": "3"
+    },
+    {
+      "name": "Workplace Relations Commission",
+      "form_field": "ctl00$ContentPlaceHolder_Main$CB2$CB2_3",
+      "form_value": "15376"
+    }
+  ],
+  "selectors": {
+    "result_card": "li.each-item",
+    "document_link": "h2.title a::attr(href)",
+    "identifier": "h2.title a",
+    "published_date": ".date",
+    "description": "p.description",
+    "next_page": "nav.pages li.current + li a::attr(href)",
+    "pdf_download": "div.related-item a.download::attr(href)",
+    "html_content": [
+      "h1.page-title + div.content",
+      "div.col-sm-9 > div.content"
+    ]
+  },
+  "date_formats": {
+    "input": [
+      "%d-%m-%Y",
+      "%Y-%m-%d"
+    ],
+    "published": [
+      "%d/%m/%Y",
+      "%d-%m-%Y",
+      "%Y-%m-%d"
+    ],
+    "form": "%d/%m/%Y"
+  }
+}

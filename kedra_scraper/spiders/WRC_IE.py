@@ -3,11 +3,12 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from io import BytesIO
 from typing import Iterator
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 import scrapy
 from pypdf import PdfReader
 
+from kedra_scraper.config import WRCSourceConfig, load_wrc_source_config
 from kedra_scraper.items import KedraScraperItem
 from kedra_scraper.utils import (
     handle_request_error as record_request_error,
@@ -17,29 +18,6 @@ from kedra_scraper.utils import (
 
 class WRC_IE_Spider(scrapy.Spider):
     name = "WRC_IE"
-    allowed_domains = ["workplacerelations.ie"]
-    search_url = "https://www.workplacerelations.ie/en/search/"
-    source = "https://www.workplacerelations.ie"
-
-    # this'll be hardcoded for now & fixed later when we focus on reproducability
-    body_categories = {
-        "Employment Appeals Tribunal": (
-            "ctl00$ContentPlaceHolder_Main$CB2$CB2_0",
-            "2",
-        ),
-        "Equality Tribunal": (
-            "ctl00$ContentPlaceHolder_Main$CB2$CB2_1",
-            "1",
-        ),
-        "Labour Court": (
-            "ctl00$ContentPlaceHolder_Main$CB2$CB2_2",
-            "3",
-        ),
-        "Workplace Relations Commission": (
-            "ctl00$ContentPlaceHolder_Main$CB2$CB2_3",
-            "15376",
-        ),
-    }
 
     def __init__(
         self,
@@ -49,63 +27,99 @@ class WRC_IE_Spider(scrapy.Spider):
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
+        self._start_date_argument = start_date
+        self._end_date_argument = end_date
 
-        if not start_date or not end_date:
+    @classmethod
+    def from_crawler(cls, crawler, *args, **kwargs):
+        spider = super().from_crawler(crawler, *args, **kwargs)
+        spider._configure(crawler.settings)
+        return spider
+
+    def _configure(self, settings) -> None:
+        """Load source rules and runtime parameters before crawling."""
+        config_path = settings.get("WRC_CONFIG_PATH")
+        if not config_path:
+            raise ValueError("WRC_CONFIG_PATH must not be empty")
+
+        self.source_config: WRCSourceConfig = load_wrc_source_config(
+            config_path
+        )
+        self.allowed_domains = list(self.source_config.allowed_domains)
+        self.search_url = self.source_config.search_url
+        self.source = self.source_config.source
+        self.partition_months = settings.getint("SCRAPE_PARTITION_MONTHS")
+
+        if self.partition_months < 1:
+            raise ValueError("SCRAPE_PARTITION_MONTHS must be at least 1")
+
+        start_value = (
+            self._start_date_argument or settings.get("SCRAPE_START_DATE")
+        )
+        end_value = self._end_date_argument or settings.get("SCRAPE_END_DATE")
+
+        if not start_value or not end_value:
             raise ValueError(
-                "Both dates are required. Example: "
-                "scrapy crawl WRC_IE -a start_date=01-01-2024 "
-                "-a end_date=31-12-2024"
+                "Both dates are required. Pass -a start_date and -a end_date "
+                "or set SCRAPE_START_DATE and SCRAPE_END_DATE."
             )
 
-        self.start_date = self._parse_scraped_date(start_date, "start_date")
-        self.end_date = self._parse_scraped_date(end_date, "end_date")
+        self.start_date = self._parse_scraped_date(
+            start_value,
+            "start_date",
+        )
+        self.end_date = self._parse_scraped_date(end_value, "end_date")
 
         if self.start_date > self.end_date:
             raise ValueError("start_date must be earlier than or equal to end_date")
 
     async def start(self):
         """Load the ASP.NET search form before submitting its partitions."""
+        query = urlencode(self.source_config.search_query)
+        separator = "&" if "?" in self.search_url else "?"
+        url = f"{self.search_url}{separator}{query}" if query else self.search_url
         yield scrapy.Request(
-            url=f"{self.search_url}?advance=true&decisions=1",
+            url=url,
             callback=self.start_partition_searches,
         )
 
-        
-
     def start_partition_searches(self, response):
-        """Submit one POST search for every month and Body category."""
-        for partition_start, partition_end in self._monthly_partitions(
+        """Submit one POST search for every period and Body category."""
+        for partition_start, partition_end in self._period_partitions(
             self.start_date,
             self.end_date,
+            self.partition_months,
         ):
             partition_date = partition_start.isoformat()
 
-            for category, (body_field, body_value) in self.body_categories.items():
+            for category_config in self.source_config.body_categories:
+                form = self.source_config.form
                 form_data = {
-                    "ctl00$ContentPlaceHolder_Main$TextBox2": (
-                        partition_start.strftime("%d/%m/%Y")
+                    form.start_date_field: partition_start.strftime(
+                        self.source_config.form_date_format
                     ),
-                    "ctl00$ContentPlaceHolder_Main$TextBox3": (
-                        partition_end.strftime("%d/%m/%Y")
+                    form.end_date_field: partition_end.strftime(
+                        self.source_config.form_date_format
                     ),
-                    body_field: body_value,
-                    "ctl00$ContentPlaceHolder_Main$refine_btn": "",
+                    category_config.form_field: category_config.form_value,
+                    form.submit_field: form.submit_value,
                 }
 
                 yield scrapy.FormRequest.from_response(
                     response,
-                    formxpath="(//form)[1]",
+                    formxpath=form.xpath,
                     formdata=form_data,
                     callback=self.parse,
                     cb_kwargs={
-                        "category": category,
+                        "category": category_config.name,
                         "partition_date": partition_date,
                     },
                 )
 
     def parse(self, response, category: str, partition_date: str):
-        """Read one results page, follow its documents, then follow pagination."""
-        result_cards = response.css("li.each-item")
+        """Read one results page, follow documents, then follow pagination."""
+        selectors = self.source_config.selectors
+        result_cards = response.css(selectors.result_card)
         self.crawler.stats.inc_value(
             "documents/expected",
             count=len(result_cards),
@@ -115,20 +129,18 @@ class WRC_IE_Spider(scrapy.Spider):
             self.logger.debug("No results found at %s", response.url)
 
         for card in result_cards:
-            document_href = card.css("h2.title a::attr(href)").get()
-            identifier = (
-                self._selector_text(card.css("h2.title a")) or None
-            )
+            document_href = card.css(selectors.document_link).get()
+            identifier = self._selector_text(
+                card.css(selectors.identifier)
+            ) or None
             published_date = self._normalise_published_date(
-                self._selector_text(card.css(".date"))
+                self._selector_text(card.css(selectors.published_date))
             )
-            description = (
-                self._selector_text(card.css("p.description")) or None
-            )
+            description = self._selector_text(
+                card.css(selectors.description)
+            ) or None
             title = "_".join(
-                value
-                for value in (identifier, description)
-                if value
+                value for value in (identifier, description) if value
             )
 
             if not document_href or not title or not published_date:
@@ -159,13 +171,10 @@ class WRC_IE_Spider(scrapy.Spider):
                     "category": category,
                     "description": description,
                     "landing_url": document_url,
-                }
+                },
             )
-        next_page = response.css(
-            "nav.pages li.current + li a::attr(href)"
-        ).get()
 
-
+        next_page = response.css(selectors.next_page).get()
         if next_page:
             yield response.follow(
                 next_page,
@@ -202,11 +211,8 @@ class WRC_IE_Spider(scrapy.Spider):
             )
             return
 
-        # Older WRC case pages are HTML wrappers around a case PDF.
-        # Scope this selector to the case download so site-wide PDFs
-        # (for example, the Cookie Policy) are never mistaken for the document.
         pdf_href = response.css(
-            "div.related-item a.download::attr(href)"
+            self.source_config.selectors.pdf_download
         ).get()
         pdf_url = response.urljoin(pdf_href) if pdf_href else None
 
@@ -228,10 +234,12 @@ class WRC_IE_Spider(scrapy.Spider):
             return
 
         try:
-            content_node = response.css("h1.page-title + div.content")
-            if not content_node:
-                content_node = response.css("div.col-sm-9 > div.content")
-
+            content_node = None
+            for selector in self.source_config.selectors.html_content:
+                selected = response.css(selector)
+                if selected:
+                    content_node = selected
+                    break
             content = self._selector_text(content_node)
         except Exception:
             self.crawler.stats.inc_value("errors/html_parsing")
@@ -420,54 +428,68 @@ class WRC_IE_Spider(scrapy.Spider):
                 unexplained_missing,
             )
 
-    @staticmethod
-    def _parse_scraped_date(value: str, argument_name: str) -> date:
-        for date_format in ("%d-%m-%Y", "%Y-%m-%d"):
+    def _parse_scraped_date(self, value: str, argument_name: str) -> date:
+        for date_format in self.source_config.input_date_formats:
             try:
                 return datetime.strptime(value, date_format).date()
             except ValueError:
                 continue
 
+        accepted = ", ".join(self.source_config.input_date_formats)
         raise ValueError(
-            f"{argument_name} must use DD-MM-YYYY or YYYY-MM-DD; got {value!r}"
+            f"{argument_name} must match one of {accepted}; got {value!r}"
         )
 
-    @staticmethod
-    def _monthly_partitions(
+    @classmethod
+    def _period_partitions(
+        cls,
         start_date: date,
         end_date: date,
+        partition_months: int,
     ) -> Iterator[tuple[date, date]]:
         partition_start = start_date
 
         while partition_start <= end_date:
-            if partition_start.month == 12:
-                next_month = date(partition_start.year + 1, 1, 1)
-            else:
-                next_month = date(
-                    partition_start.year,
-                    partition_start.month + 1,
-                    1,
-                )
-
-            partition_end = min(end_date, next_month - timedelta(days=1))
+            month_start = date(
+                partition_start.year,
+                partition_start.month,
+                1,
+            )
+            next_partition = cls._add_months(
+                month_start,
+                partition_months,
+            )
+            partition_end = min(
+                end_date,
+                next_partition - timedelta(days=1),
+            )
             yield partition_start, partition_end
-            partition_start = next_month
+            partition_start = next_partition
+
+    @staticmethod
+    def _add_months(value: date, months: int) -> date:
+        month_index = value.year * 12 + value.month - 1 + months
+        return date(month_index // 12, month_index % 12 + 1, 1)
 
     @classmethod
     def _selector_text(cls, selector) -> str:
+        if selector is None:
+            return ""
         return cls._clean_text(" ".join(selector.xpath(".//text()").getall()))
 
     @staticmethod
     def _clean_text(value: str | None) -> str:
         return " ".join((value or "").split())
 
-    @classmethod
-    def _normalise_published_date(cls, value: str) -> str:
-        cleaned_value = cls._clean_text(value)
+    def _normalise_published_date(self, value: str) -> str:
+        cleaned_value = self._clean_text(value)
 
-        for date_format in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d"):
+        for date_format in self.source_config.published_date_formats:
             try:
-                return datetime.strptime(cleaned_value, date_format).date().isoformat()
+                return datetime.strptime(
+                    cleaned_value,
+                    date_format,
+                ).date().isoformat()
             except ValueError:
                 continue
 

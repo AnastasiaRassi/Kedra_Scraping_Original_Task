@@ -50,6 +50,61 @@ Copy-Item .env.example .env
 
 Leave `PERSISTENCE_ENABLED=false` for JSON-only test crawls. Set it to `true` only when both MongoDB and MinIO are running.
 
+
+## Configuration
+
+Runtime configuration is loaded from the repository-root `.env` file. Copy `.env.example` to `.env`; the real `.env` is ignored by Git and must not be committed.
+
+Date inputs can be supplied either as spider arguments or environment variables. Spider arguments take precedence:
+
+```powershell
+scrapy crawl WRC_IE -a start_date=01-01-2025 -a end_date=31-01-2025
+```
+
+```env
+SCRAPE_START_DATE=01-01-2025
+SCRAPE_END_DATE=31-01-2025
+```
+
+The main environment groups are:
+
+| Area | Variables |
+| --- | --- |
+| Crawl period | `SCRAPE_START_DATE`, `SCRAPE_END_DATE`, `SCRAPE_PARTITION_MONTHS` |
+| Source config | `WRC_CONFIG_PATH` |
+| Request identity | `SCRAPY_USER_AGENT`, `SCRAPY_ACCEPT_HEADER`, `SCRAPY_ACCEPT_LANGUAGE` |
+| Request behavior | `SCRAPY_ROBOTSTXT_OBEY`, `SCRAPY_COOKIES_ENABLED`, `SCRAPY_TELNETCONSOLE_ENABLED` |
+| Concurrency | `SCRAPY_CONCURRENT_REQUESTS`, `SCRAPY_CONCURRENT_REQUESTS_PER_DOMAIN`, `SCRAPY_DOWNLOAD_DELAY`, `SCRAPY_RANDOMIZE_DOWNLOAD_DELAY` |
+| AutoThrottle | `SCRAPY_AUTOTHROTTLE_ENABLED`, `SCRAPY_AUTOTHROTTLE_START_DELAY`, `SCRAPY_AUTOTHROTTLE_MAX_DELAY`, `SCRAPY_AUTOTHROTTLE_TARGET_CONCURRENCY`, `SCRAPY_AUTOTHROTTLE_DEBUG` |
+| Resilience | `SCRAPY_DOWNLOAD_TIMEOUT`, `SCRAPY_RETRY_TIMES` |
+| Logging/export | `SCRAPY_LOG_LEVEL`, `SCRAPY_FEED_EXPORT_ENCODING` |
+| MongoDB | `MONGO_URI`, `MONGO_DATABASE`, `MONGO_COLLECTION`, `MONGO_SERVER_SELECTION_TIMEOUT_MS` |
+| MinIO | `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `MINIO_SECURE`, `MINIO_BUCKET`, `MINIO_PREFIX` |
+| Docker | Image, container, bind-host, port and data-path variables listed in `.env.example` |
+
+All supported variables and local-development defaults are listed in `.env.example`. Numeric and Boolean settings are validated when Scrapy loads; malformed values fail early with the variable name.
+
+Website-specific rules live in `config/wrc.json`, including:
+
+- Source and search URLs.
+- Allowed domains and initial search query.
+- ASP.NET form fields.
+- WRC Body categories and values.
+- Result, pagination, HTML and PDF selectors.
+- Accepted input, form and publication-date formats.
+
+Set `WRC_CONFIG_PATH` to use a different JSON configuration without changing the spider.
+
+The storage containers also consume `.env`. Start them with:
+
+```powershell
+docker compose config
+docker compose up -d
+docker compose ps
+```
+
+`MONGO_DATA_PATH` and `MINIO_DATA_PATH` can be Docker volume names or host paths. The defaults use persistent named volumes.
+
 ## Running the WRC spider
 
 The spider accepts dates in either `DD-MM-YYYY` or `YYYY-MM-DD` format.
@@ -79,7 +134,7 @@ Because several requests may already be in flight, `CLOSESPIDER_ITEMCOUNT=100` c
 
 ## Partitioning
 
-The requested interval is split into monthly partitions. For example:
+The requested interval is split into configurable month-based partitions. `SCRAPE_PARTITION_MONTHS=1` produces monthly partitions. For example:
 
 ```text
 start_date: 01-01-2024
@@ -91,9 +146,9 @@ partitions:
 2024-03-01 to 2024-03-31
 ```
 
-Each record receives the first date of its monthly partition as `partition_date`.
+Each record receives the first date of its partition as `partition_date`. Increase `SCRAPE_PARTITION_MONTHS` to group multiple calendar months into one partition.
 
-For every monthly partition, the spider submits one search per WRC Body category. These searches can run concurrently while remaining subject to the configured per-domain concurrency and AutoThrottle limits.
+For every partition, the spider submits one search per configured WRC Body category. These searches can run concurrently while remaining subject to the configured per-domain concurrency and AutoThrottle limits.
 
 ## Document flow
 
@@ -245,17 +300,7 @@ A source identifier must therefore not be assumed to be unique. The future persi
 
 ## Request settings
 
-The project currently uses:
-
-- `ROBOTSTXT_OBEY = True`
-- `CONCURRENT_REQUESTS_PER_DOMAIN = 4`
-- `DOWNLOAD_DELAY = 0.1`
-- `AUTOTHROTTLE_TARGET_CONCURRENCY = 2.0`
-- `DOWNLOAD_TIMEOUT = 30`
-- `RETRY_TIMES = 3`
-- `LOG_LEVEL = "INFO"`
-
-AutoThrottle adjusts request timing based on observed server latency. The configured concurrency values are ceilings rather than a guarantee that every slot is continuously occupied.
+Request limits, delays, AutoThrottle, timeouts, retries, headers, cookies, robots.txt behavior and logging are environment-backed. The checked-in `.env.example` contains the conservative defaults used during WRC validation. AutoThrottle still adapts timing to observed latency, while configured concurrency values remain upper bounds.
 
 ## Planned work
 
@@ -263,4 +308,4 @@ AutoThrottle adjusts request timing based on observed server latency. The config
 - Populate source-specific metadata.
 - Add OCR handling for scanned PDFs.
 - Add automated parser and persistence integration tests.
-- Add production secret management and deployment configuration.
+- Integrate a production secret manager for deployed credentials.
