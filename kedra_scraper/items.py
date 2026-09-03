@@ -13,7 +13,7 @@ class KedraScraperItem:
     published_date: str
     partition_date: str
     content: str
-    identifier: str
+    identifier: str | None
     source: str
     category: str
     source_format: Literal["html", "pdf"]
