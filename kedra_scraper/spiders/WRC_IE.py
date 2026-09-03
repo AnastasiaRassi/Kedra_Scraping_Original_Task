@@ -113,15 +113,22 @@ class WRC_IE_Spider(scrapy.Spider):
 
         for card in result_cards:
             document_href = card.css("h2.title a::attr(href)").get()
-            identifier = self._selector_text(card.css("h2.title a"))
+            identifier = (
+                self._selector_text(card.css("h2.title a")) or None
+            )
             published_date = self._normalise_published_date(
                 self._selector_text(card.css(".date"))
             )
-            # WRC calls this element "description", but it is the case name.
-            title = self._selector_text(card.css("p.description")) or identifier
-            description = None
+            description = (
+                self._selector_text(card.css("p.description")) or None
+            )
+            title = "_".join(
+                value
+                for value in (identifier, description)
+                if value
+            )
 
-            if not document_href or not identifier or not published_date:
+            if not document_href or not title or not published_date:
                 self.crawler.stats.inc_value("documents/incomplete_result")
                 self.logger.warning(
                     "Skipping an incomplete search result on %s",
@@ -169,7 +176,7 @@ class WRC_IE_Spider(scrapy.Spider):
         self,
         response,
         title: str,
-        identifier: str,
+        identifier: str | None,
         published_date: str,
         partition_date: str,
         category: str,
@@ -255,7 +262,7 @@ class WRC_IE_Spider(scrapy.Spider):
         self,
         response,
         title: str,
-        identifier: str,
+        identifier: str | None,
         published_date: str,
         partition_date: str,
         category: str,
