@@ -303,11 +303,16 @@ def _run_scrapy(
             env=os.environ.copy(),
             capture_output=True,
             text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout_seconds,
             check=False,
         )
+
+        if result.returncode != 0:
+            context.log.error(f"Scrapy stdout:\n{result.stdout}")
+            context.log.error(f"Scrapy stderr:\n{result.stderr}")
+
+            raise Failure(
+                description=f"Scrapy exited with code {result.returncode}"
+            )
     except subprocess.TimeoutExpired as exc:
         _log_subprocess_tail(context, "stdout", exc.stdout)
         _log_subprocess_tail(context, "stderr", exc.stderr)
