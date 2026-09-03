@@ -66,6 +66,8 @@ class WRC_IE_Spider(scrapy.Spider):
             callback=self.start_partition_searches,
         )
 
+        
+
     def start_partition_searches(self, response):
         """Submit one POST search for every month and Body category."""
         for partition_start, partition_end in self._monthly_partitions(
@@ -131,6 +133,7 @@ class WRC_IE_Spider(scrapy.Spider):
             yield scrapy.Request(
                 url=document_url,
                 callback=callback,
+                errback=self.handle_request_error,
                 cb_kwargs={
                     "title": title,
                     "identifier": identifier,
@@ -138,7 +141,7 @@ class WRC_IE_Spider(scrapy.Spider):
                     "partition_date": partition_date,
                     "category": category,
                     "description": description,
-                },
+                }
             )
         next_page = response.css(
             "nav.pages li.current + li a::attr(href)"
