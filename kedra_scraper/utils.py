@@ -10,9 +10,6 @@ from scrapy.spidermiddlewares.httperror import HttpError
 from twisted.internet.error import DNSLookupError, TCPTimedOutError, TimeoutError
 from twisted.python.failure import Failure
 
-from kedra_scraper.config import load_source_registry
-
-
 def hash_document(content: str | bytes) -> str:
     """Return a SHA-256 hash for non-empty document content."""
     if isinstance(content, str):
