@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from benchmarks.crawl_profiler import parse_assignments
-from kedra_scraper.extensions import build_crawl_profile, latency_summary
+from benchmarks.extensions import build_crawl_profile, latency_summary
 
 
 class CrawlProfileTests(unittest.TestCase):
