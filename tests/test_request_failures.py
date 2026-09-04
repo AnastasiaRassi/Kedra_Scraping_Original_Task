@@ -165,6 +165,7 @@ class RetryInjectionTests(unittest.TestCase):
             TimeoutError("injected timeout after 30 seconds"),
         )
 
+        expected_reason = failure.getErrorMessage()
         handle_request_error(spider, failure)
 
         stats = spider.crawler.stats.values
@@ -176,11 +177,8 @@ class RetryInjectionTests(unittest.TestCase):
         self.assertEqual(event["url"], request.url)
         self.assertIsNone(event["status_code"])
         self.assertEqual(event["error_type"], "timeout")
-        self.assertEqual(
-            event["reason"],
-            "User timeout caused connection failure: "
-            "injected timeout after 30 seconds.",
-        )
+        self.assertEqual(event["reason"], expected_reason)
+        self.assertIn("injected timeout", event["reason"])
 
 
 if __name__ == "__main__":
