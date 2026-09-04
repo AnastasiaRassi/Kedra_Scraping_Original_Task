@@ -205,7 +205,8 @@ Run a bounded profile through the source registry:
 python -m benchmarks.crawl_profiler `
   --source wrc_ie `
   -a start_date=01-01-2008 `
-  -a end_date=31-01-2008
+  -a end_date=31-01-2008 `
+  --require-clean-git
 ```
 
 Using `--source wrc_ie` applies the WRC settings registered in
@@ -229,12 +230,28 @@ starts.
 
 Each report under `reports/crawl_profiles/` records:
 
-- The exact concurrency, throttling, timeout and retry settings used.
+- Every spider argument, including `start_date` and `end_date`.
+- The final effective concurrency, throttling, timeout and retry settings.
+- The Git commit, branch, dirty-state flag, and tracked-diff fingerprint.
+- Python, platform, CPU, and relevant installed dependency versions.
+- SHA-256 fingerprints for the source registry, site configuration, and
+  `requirements.txt`.
 - Duration, scraped documents per minute and response-byte volume.
 - Response-latency minimum, mean, p50, p95, p99 and maximum.
 - HTTP status counts and rates, including `403`, `429` and combined `5xx`.
 - Retry attempts, successful retry chains, exhausted chains and recovery rate.
 - Expected, scraped, missing, dropped and extraction-failure counts.
+
+Credential-like command arguments are represented by a SHA-256 fingerprint,
+not written in plaintext. Use `--require-clean-git` for a formal benchmark;
+it refuses to run when local code differs from the recorded commit. Omit it
+while experimenting if you deliberately want to measure uncommitted code.
+
+This makes the benchmark configuration reconstructable and auditable, but it
+does not promise byte-for-byte replay of a live website. Exact replay would
+also require archiving every HTTP response, which would add storage I/O and
+change the performance being measured. The report states
+`response_replay.available=false` explicitly.
 
 When `--max-items` stops a sampled crawl, the report leaves
 `unexplained_missing` unevaluated because the crawl was intentionally
