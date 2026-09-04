@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 
 from benchmarks.crawl_profiler import parse_assignments
 from benchmarks.extensions import build_crawl_profile, latency_summary
+from benchmarks.reproducibility import capture_reproducibility_metadata
 
 
 class CrawlProfileTests(unittest.TestCase):
@@ -57,6 +60,56 @@ class CrawlProfileTests(unittest.TestCase):
         summary = latency_summary([1.0, 2.0, 3.0, 4.0])
         self.assertEqual(summary["p50"], 2.5)
         self.assertEqual(summary["p95"], 3.85)
+
+    def test_reproducibility_metadata_captures_inputs_and_hashes_configs(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = root / "source.json"
+            requirements = root / "requirements.txt"
+            config.write_text('{"source": "example"}\n', encoding="utf-8")
+            requirements.write_text("Scrapy==2.18.0\n", encoding="utf-8")
+
+            metadata = capture_reproducibility_metadata(
+                project_root=root,
+                spider="example",
+                source="example_source",
+                spider_args={
+                    "start_date": "01-01-2026",
+                    "end_date": "31-01-2026",
+                },
+                setting_overrides={
+                    "DOWNLOAD_DELAY": "0.5",
+                    "API_TOKEN": "do-not-store",
+                },
+                config_paths=["source.json"],
+                with_persistence=False,
+                max_items=None,
+                log_level="INFO",
+            )
+
+        invocation = metadata["invocation"]
+        self.assertEqual(
+            invocation["spider_arguments"]["start_date"],
+            "01-01-2026",
+        )
+        self.assertTrue(
+            invocation["setting_overrides"]["API_TOKEN"]["redacted"]
+        )
+        self.assertNotIn(
+            "do-not-store",
+            str(metadata),
+        )
+        self.assertTrue(
+            metadata["source_configuration"]["files"][0]["exists"]
+        )
+        self.assertEqual(
+            len(metadata["source_configuration"]["files"][0]["sha256"]),
+            64,
+        )
+        self.assertEqual(len(metadata["requirements"]["sha256"]), 64)
+        self.assertFalse(metadata["response_replay"]["available"])
 
     def test_assignment_parser_accepts_values_containing_equals(self) -> None:
         self.assertEqual(
