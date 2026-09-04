@@ -11,6 +11,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from benchmarks.reproducibility import capture_reproducibility_metadata
 from kedra_scraper.config import load_source_registry
 
 
@@ -28,6 +29,38 @@ def main(argv: list[str] | None = None) -> int:
         spider=args.spider,
         registry_path=args.registry,
     )
+    merged_inputs = {**source_settings, **overrides}
+    config_paths = [
+        args.registry,
+        *[
+            value
+            for name, value in merged_inputs.items()
+            if name.endswith("_CONFIG_PATH")
+        ],
+    ]
+    reproducibility = capture_reproducibility_metadata(
+        project_root=PROJECT_ROOT,
+        spider=spider,
+        source=source,
+        spider_args=spider_args,
+        setting_overrides=overrides,
+        config_paths=config_paths,
+        with_persistence=args.with_persistence,
+        max_items=args.max_items,
+        log_level=args.log_level.upper(),
+    )
+    if args.require_clean_git:
+        git = reproducibility["git"]
+        if not git["available"]:
+            raise SystemExit(
+                "--require-clean-git was requested, but Git state could not "
+                "be inspected."
+            )
+        if git["dirty"]:
+            raise SystemExit(
+                "--require-clean-git was requested, but the working tree "
+                "contains local changes."
+            )
 
     destination = (
         args.output.expanduser()
@@ -67,6 +100,17 @@ def main(argv: list[str] | None = None) -> int:
 
     if destination.exists():
         report = json.loads(destination.read_text(encoding="utf-8"))
+        reproducibility["completed_at_utc"] = datetime.now(
+            timezone.utc
+        ).isoformat()
+        reproducibility["subprocess_return_code"] = completed.returncode
+        reproducibility["effective_scrapy_settings"] = report.get(
+            "settings",
+            {},
+        )
+        report["schema_version"] = 2
+        report["reproducibility"] = reproducibility
+        _write_report(destination, report)
         print_profile(report, destination)
     else:
         print(
@@ -183,6 +227,14 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-items", type=_positive_integer)
     parser.add_argument("--log-level", default="INFO")
     parser.add_argument(
+        "--require-clean-git",
+        action="store_true",
+        help=(
+            "Refuse to benchmark uncommitted code. Recommended for results "
+            "that will be compared or reported."
+        ),
+    )
+    parser.add_argument(
         "--with-persistence",
         action="store_true",
         help="Include configured MongoDB and MinIO persistence in the run.",
@@ -190,6 +242,21 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+
+
+def _write_report(path: Path, report: dict) -> None:
+    temporary = path.with_suffix(f"{path.suffix}.tmp")
+    temporary.write_text(
+        json.dumps(
+            report,
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
 
 def _profile_log_path(profile_path: Path) -> Path:
     root = Path(os.getenv("SCRAPY_LOG_DIR", "logs")).expanduser()
