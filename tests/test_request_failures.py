@@ -89,6 +89,17 @@ def _document_request(url: str) -> Request:
     )
 
 
+def _search_request(url: str) -> Request:
+    return Request(
+        url,
+        meta={"retry_times": 3},
+        cb_kwargs={
+            "partition_date": "2026-08-01",
+            "category": "Test body",
+        },
+    )
+
+
 class RetryInjectionTests(unittest.TestCase):
     def test_three_retries_then_exhaustion(self) -> None:
         spider = _Spider()
@@ -179,6 +190,32 @@ class RetryInjectionTests(unittest.TestCase):
         self.assertEqual(event["error_type"], "timeout")
         self.assertEqual(event["reason"], expected_reason)
         self.assertIn("injected timeout", event["reason"])
+
+    def test_exhausted_search_request_enters_reconciliation(self) -> None:
+        spider = _Spider()
+        request = _search_request("https://example.test/results?page=2")
+        failure = _Failure(
+            request,
+            TimeoutError("pagination timed out"),
+        )
+
+        handle_request_error(spider, failure, request_kind="search")
+
+        stats = spider.crawler.stats.values
+        self.assertEqual(stats["search/request_failed"], 1)
+        self.assertEqual(
+            stats[
+                "body_partition/2026-08-01/Test body/request_failures"
+            ],
+            1,
+        )
+        self.assertNotIn(
+            "body_partition/2026-08-01/Test body/failed",
+            stats,
+        )
+        event = spider.logger.events[-1]
+        self.assertEqual(event["event"], "search_request_failed")
+        self.assertEqual(event["url"], request.url)
 
 
 if __name__ == "__main__":

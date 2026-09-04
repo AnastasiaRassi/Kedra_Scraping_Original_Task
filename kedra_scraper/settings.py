@@ -126,6 +126,21 @@ ITEM_PIPELINES = {
 
 # Persistence is opt-in so JSON test crawls work without local services.
 PERSISTENCE_ENABLED = env_bool("PERSISTENCE_ENABLED", False)
+PERSISTENCE_RETRY_TIMES = env_int(
+    "PERSISTENCE_RETRY_TIMES",
+    2,
+    minimum=0,
+)
+PERSISTENCE_RETRY_BASE_DELAY_SECONDS = env_float(
+    "PERSISTENCE_RETRY_BASE_DELAY_SECONDS",
+    0.5,
+    minimum=0.0,
+)
+PERSISTENCE_RETRY_MAX_DELAY_SECONDS = env_float(
+    "PERSISTENCE_RETRY_MAX_DELAY_SECONDS",
+    5.0,
+    minimum=0.0,
+)
 
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
 MONGO_DATABASE = os.getenv("MONGO_DATABASE", "kedra")

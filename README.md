@@ -100,6 +100,7 @@ configuration. No local credentials belong in source code.
 | Area | Main variables |
 | --- | --- |
 | Storage switch | `PERSISTENCE_ENABLED` |
+| Storage retries | `PERSISTENCE_RETRY_TIMES`, `PERSISTENCE_RETRY_BASE_DELAY_SECONDS`, `PERSISTENCE_RETRY_MAX_DELAY_SECONDS` |
 | MongoDB | `MONGO_URI`, `MONGO_DATABASE`, `MONGO_COLLECTION`, `MONGO_SERVER_SELECTION_TIMEOUT_MS` |
 | MinIO | `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `MINIO_SECURE`, `MINIO_BUCKET`, `MINIO_PREFIX` |
 | Docker | Image, container, bind-host, port, credential, and data-path variables in `.env.example` |
@@ -271,6 +272,11 @@ their URL, HTTP status when available, exact reason, and body/month
 reconciliation counters. The timeout test is simulated and does not actually
 wait 30 seconds.
 
+The persistence tests inject one temporary MinIO upload failure and one
+temporary MongoDB upsert failure. They verify recovery, retry counters, the
+bounded exponential delay sequence, and that deterministic failures are not
+retried. No live storage service is contacted.
+
 To run only these tests:
 
 ```powershell
@@ -421,10 +427,14 @@ Reruns are safe:
 
 ## Retries and failure handling
 
-There are two retry layers:
+Recovery operates at three scopes:
 
 - Scrapy retries eligible individual HTTP requests according to
   `SCRAPY_RETRY_TIMES` and `SCRAPY_DOWNLOAD_TIMEOUT`.
+- The persistence pipelines retry only transient MinIO/MongoDB operations.
+  The default two retries wait 0.5 then 1 second; the delay doubles up to the
+  configured maximum. Validation, authentication, and other deterministic
+  errors are not retried.
 - Dagster retries an entire failed source/month asset according to
   `DAGSTER_CRAWL_MAX_RETRIES` and
   `DAGSTER_CRAWL_RETRY_DELAY_SECONDS`, with exponential backoff.
@@ -433,6 +443,11 @@ The raw asset reads the spider's JSON crawl summary and rejects a partition
 when its close reason, final request failures, persistence failures, or
 unexplained missing count exceed configured limits. Because storage is
 idempotent, retrying the whole partition is safe.
+
+Persistence retries are also idempotent: MinIO repeats the same stable object
+key and MongoDB repeats the same `record_key` upsert. Every attempt, recovery,
+and exhausted retry chain is counted in the crawl statistics and written to
+the structured log.
 
 Operational scraping failures such as unavailable MongoDB/MinIO fail the
 Dagster asset and are retried. A deterministic per-document extraction error

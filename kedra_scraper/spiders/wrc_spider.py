@@ -597,6 +597,18 @@ class WRC_IE_Spider(scrapy.Spider):
             "missing": missing,
             "unexplained_missing": unexplained_missing,
             "persistence_errors": persistence_errors,
+            "persistence_retry_attempts": stats.get_value(
+                "persistence/retry_attempts",
+                0,
+            ),
+            "persistence_retry_recovered": stats.get_value(
+                "persistence/retry_recovered",
+                0,
+            ),
+            "persistence_retry_exhausted": stats.get_value(
+                "persistence/retry_exhausted",
+                0,
+            ),
             "html_extracted": stats.get_value(
                 "documents/html_extracted",
                 0,

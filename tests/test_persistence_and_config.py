@@ -14,6 +14,7 @@ try:
         MinioPipeline,
         MongoPipeline,
         _build_blob_object_name,
+        _retry_with_exponential_backoff,
     )
     from kedra_scraper.scraping import _download_blob
 except ModuleNotFoundError as exc:
@@ -41,11 +42,25 @@ class _Stats:
 
 
 class _Logger:
+    def __init__(self) -> None:
+        self.events: list[dict] = []
+
     def error(self, *args, **kwargs) -> None:
         pass
 
     def exception(self, *args, **kwargs) -> None:
         pass
+
+    def log(self, level, message, **kwargs) -> None:
+        extra = kwargs.get("extra", {})
+        self.events.append(
+            {
+                "level": level,
+                "message": message,
+                "event": extra.get("event"),
+                **extra.get("structured_fields", {}),
+            }
+        )
 
 
 class _Spider:
@@ -94,6 +109,18 @@ class _ChangedCurrentMinioClient:
         return SimpleNamespace(etag="updated-etag")
 
 
+class _RetryingMinioClient(_ChangedCurrentMinioClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.put_attempts = 0
+
+    def put_object(self, **kwargs):
+        self.put_attempts += 1
+        if self.put_attempts == 1:
+            raise OSError("temporary MinIO connection loss")
+        return super().put_object(**kwargs)
+
+
 class _BlobResponse:
     def read(self) -> bytes:
         return b"current bytes"
@@ -125,6 +152,18 @@ class _MongoCollection:
     def update_one(self, query: dict, update: dict, upsert: bool):
         self.update = update
         return SimpleNamespace(upserted_id="inserted")
+
+
+class _RetryingMongoCollection(_MongoCollection):
+    def __init__(self, existing: dict | None = None) -> None:
+        super().__init__(existing)
+        self.update_attempts = 0
+
+    def update_one(self, query: dict, update: dict, upsert: bool):
+        self.update_attempts += 1
+        if self.update_attempts == 1:
+            raise OSError("temporary MongoDB connection loss")
+        return super().update_one(query, update, upsert)
 
 
 @unittest.skipIf(
@@ -201,6 +240,45 @@ class PersistenceUpsertTests(unittest.TestCase):
             [f"documents/{document['record_key']}/current"],
         )
 
+    def test_transient_minio_write_is_retried_and_reported(self) -> None:
+        client = _RetryingMinioClient()
+        pipeline = MinioPipeline(
+            enabled=True,
+            endpoint="unused",
+            access_key="unused",
+            secret_key="unused",
+            secure=False,
+            bucket="raw-documents",
+            prefix="documents",
+            retry_times=2,
+            retry_base_delay=0,
+            retry_max_delay=0,
+        )
+        pipeline.client = client
+        spider = _Spider()
+
+        pipeline.process_item(
+            {
+                "source": "https://example.test",
+                "landing_url": "https://example.test/document/1",
+                "doc_url": "https://example.test/document/1.pdf",
+                "source_format": "pdf",
+                "raw_content": b"new source bytes",
+            },
+            spider,
+        )
+
+        self.assertEqual(client.put_attempts, 2)
+        self.assertEqual(
+            spider.crawler.stats.values["persistence/retry_attempts"],
+            1,
+        )
+        self.assertEqual(
+            spider.crawler.stats.values["persistence/retry_recovered"],
+            1,
+        )
+        self.assertEqual(spider.logger.events[0]["operation"], "minio_put")
+
     def test_mongodb_removes_legacy_blob_history(self) -> None:
         blob = {
             "bucket": "raw-documents",
@@ -231,6 +309,90 @@ class PersistenceUpsertTests(unittest.TestCase):
         self.assertNotIn("$addToSet", collection.update)
         self.assertEqual(collection.update["$unset"]["blob_history"], "")
         self.assertEqual(collection.update["$set"]["blob"], blob)
+
+    def test_transient_mongodb_upsert_is_retried_and_reported(self) -> None:
+        blob = {
+            "bucket": "raw-documents",
+            "object_key": "documents/record/current",
+            "sha256": "hash",
+        }
+        collection = _RetryingMongoCollection(existing=None)
+        pipeline = MongoPipeline(
+            enabled=True,
+            uri="unused",
+            database="unused",
+            collection="unused",
+            timeout_ms=1,
+            retry_times=2,
+            retry_base_delay=0,
+            retry_max_delay=0,
+        )
+        pipeline.collection = collection
+        spider = _Spider()
+
+        pipeline.process_item(
+            {"record_key": "record", "blob": blob},
+            spider,
+        )
+
+        self.assertEqual(collection.update_attempts, 2)
+        self.assertEqual(
+            spider.crawler.stats.values[
+                "persistence/retry_attempts/mongodb_upsert"
+            ],
+            1,
+        )
+        self.assertEqual(
+            spider.crawler.stats.values[
+                "persistence/retry_recovered/mongodb_upsert"
+            ],
+            1,
+        )
+
+    def test_backoff_doubles_until_the_configured_cap(self) -> None:
+        attempts = 0
+        delays: list[float] = []
+
+        def operation() -> str:
+            nonlocal attempts
+            attempts += 1
+            if attempts < 5:
+                raise OSError("temporary failure")
+            return "recovered"
+
+        result = _retry_with_exponential_backoff(
+            operation,
+            retry_times=4,
+            base_delay=1,
+            max_delay=3,
+            should_retry=lambda exc: isinstance(exc, OSError),
+            sleeper=delays.append,
+        )
+
+        self.assertEqual(result, "recovered")
+        self.assertEqual(delays, [1, 2, 3, 3])
+
+    def test_non_transient_failure_is_not_retried(self) -> None:
+        attempts = 0
+        delays: list[float] = []
+
+        def invalid_operation() -> None:
+            nonlocal attempts
+            attempts += 1
+            raise ValueError("invalid payload")
+
+        with self.assertRaisesRegex(ValueError, "invalid payload"):
+            _retry_with_exponential_backoff(
+                invalid_operation,
+                retry_times=3,
+                base_delay=1,
+                max_delay=5,
+                should_retry=lambda exc: isinstance(exc, OSError),
+                sleeper=delays.append,
+            )
+
+        self.assertEqual(attempts, 1)
+        self.assertEqual(delays, [])
 
     def test_scraper_reads_the_current_object(self) -> None:
         client = _BlobClient()

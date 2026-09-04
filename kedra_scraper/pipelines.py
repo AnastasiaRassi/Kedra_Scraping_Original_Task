@@ -1,15 +1,180 @@
 from __future__ import annotations
 
+import logging
+from collections.abc import Callable
 from datetime import datetime, timezone
 from io import BytesIO
+from time import sleep
+from typing import TypeVar
 
 from itemadapter import ItemAdapter
 from minio import Minio
 from minio.error import S3Error
 from pymongo import ASCENDING, MongoClient
+from pymongo.errors import (
+    AutoReconnect,
+    ConnectionFailure,
+    NetworkTimeout,
+    PyMongoError,
+    ServerSelectionTimeoutError,
+)
 from scrapy.exceptions import DropItem
+from urllib3.exceptions import HTTPError as Urllib3HTTPError
 
+from kedra_scraper.structured_logging import log_structured
 from kedra_scraper.utils import hash_document
+
+
+T = TypeVar("T")
+
+_RETRYABLE_S3_ERROR_CODES = {
+    "InternalError",
+    "RequestTimeout",
+    "RequestTimeoutException",
+    "ServiceUnavailable",
+    "SlowDown",
+    "Throttling",
+    "TooManyRequests",
+    "XMinioServerNotInitialized",
+    "XMinioServerNotReady",
+}
+_RETRYABLE_HTTP_STATUSES = {429, 500, 502, 503, 504}
+_RETRYABLE_MONGODB_LABELS = {
+    "RetryableWriteError",
+    "TransientTransactionError",
+}
+
+
+def _is_transient_storage_error(exc: Exception) -> bool:
+    """Return whether repeating a storage operation can reasonably recover."""
+    if isinstance(exc, S3Error):
+        status = getattr(getattr(exc, "response", None), "status", None)
+        return (
+            exc.code in _RETRYABLE_S3_ERROR_CODES
+            or status in _RETRYABLE_HTTP_STATUSES
+        )
+
+    if isinstance(
+        exc,
+        (
+            AutoReconnect,
+            ConnectionFailure,
+            NetworkTimeout,
+            ServerSelectionTimeoutError,
+        ),
+    ):
+        return True
+
+    if isinstance(exc, PyMongoError):
+        return any(
+            exc.has_error_label(label)
+            for label in _RETRYABLE_MONGODB_LABELS
+        )
+
+    return isinstance(
+        exc,
+        (ConnectionError, TimeoutError, OSError, Urllib3HTTPError),
+    )
+
+
+def _retry_with_exponential_backoff(
+    operation: Callable[[], T],
+    *,
+    retry_times: int,
+    base_delay: float,
+    max_delay: float,
+    should_retry: Callable[[Exception], bool],
+    on_retry: Callable[[int, float, Exception], None] | None = None,
+    sleeper: Callable[[float], None] = sleep,
+) -> T:
+    """Retry one synchronous operation using a bounded exponential delay."""
+    if retry_times < 0:
+        raise ValueError("retry_times must be non-negative")
+    if base_delay < 0 or max_delay < 0:
+        raise ValueError("retry delays must be non-negative")
+
+    retries_used = 0
+    while True:
+        try:
+            return operation()
+        except Exception as exc:
+            if retries_used >= retry_times or not should_retry(exc):
+                raise
+
+            retries_used += 1
+            delay = min(base_delay * (2 ** (retries_used - 1)), max_delay)
+            if on_retry is not None:
+                on_retry(retries_used, delay, exc)
+            sleeper(delay)
+
+
+def _run_storage_operation(
+    operation: Callable[[], T],
+    *,
+    spider,
+    operation_name: str,
+    retry_times: int,
+    base_delay: float,
+    max_delay: float,
+) -> T:
+    """Run and report a retry-safe MinIO or MongoDB operation."""
+    retries_used = 0
+
+    def record_retry(
+        retry_number: int,
+        delay: float,
+        exc: Exception,
+    ) -> None:
+        nonlocal retries_used
+        retries_used = retry_number
+        spider.crawler.stats.inc_value("persistence/retry_attempts")
+        spider.crawler.stats.inc_value(
+            f"persistence/retry_attempts/{operation_name}"
+        )
+        log_structured(
+            spider.logger,
+            logging.WARNING,
+            "persistence_retry",
+            "Transient persistence operation failed; retrying",
+            operation=operation_name,
+            retry_number=retry_number,
+            retry_limit=retry_times,
+            delay_seconds=delay,
+            error_type=type(exc).__name__,
+            reason=str(exc),
+        )
+
+    try:
+        result = _retry_with_exponential_backoff(
+            operation,
+            retry_times=retry_times,
+            base_delay=base_delay,
+            max_delay=max_delay,
+            should_retry=_is_transient_storage_error,
+            on_retry=record_retry,
+        )
+    except Exception as exc:
+        if _is_transient_storage_error(exc):
+            spider.crawler.stats.inc_value("persistence/retry_exhausted")
+            spider.crawler.stats.inc_value(
+                f"persistence/retry_exhausted/{operation_name}"
+            )
+        raise
+
+    if retries_used:
+        spider.crawler.stats.inc_value("persistence/retry_recovered")
+        spider.crawler.stats.inc_value(
+            f"persistence/retry_recovered/{operation_name}"
+        )
+        log_structured(
+            spider.logger,
+            logging.INFO,
+            "persistence_retry_recovered",
+            "Persistence operation recovered after retry",
+            operation=operation_name,
+            retries_used=retries_used,
+        )
+    return result
 
 
 def _build_record_key(document: dict) -> str:
@@ -63,6 +228,8 @@ class MinioPipeline:
     included in the MinIO key: a hash-based key would create another object
     for every replacement instead of overwriting the older object, retaining
     historical blobs that this latest-state storage requirement does not need.
+    Retrying a transient upload is safe because every attempt targets that same
+    stable object key with the same bytes.
     """
 
     def __init__(
@@ -74,6 +241,9 @@ class MinioPipeline:
         secure: bool,
         bucket: str,
         prefix: str,
+        retry_times: int = 2,
+        retry_base_delay: float = 0.5,
+        retry_max_delay: float = 5.0,
     ):
         self.enabled = enabled
         self.endpoint = endpoint
@@ -82,6 +252,9 @@ class MinioPipeline:
         self.secure = secure
         self.bucket = bucket
         self.prefix = prefix.strip("/")
+        self.retry_times = retry_times
+        self.retry_base_delay = retry_base_delay
+        self.retry_max_delay = retry_max_delay
         self.client: Minio | None = None
 
     @classmethod
@@ -95,6 +268,13 @@ class MinioPipeline:
             secure=settings.getbool("MINIO_SECURE"),
             bucket=settings.get("MINIO_BUCKET"),
             prefix=settings.get("MINIO_PREFIX"),
+            retry_times=settings.getint("PERSISTENCE_RETRY_TIMES"),
+            retry_base_delay=settings.getfloat(
+                "PERSISTENCE_RETRY_BASE_DELAY_SECONDS"
+            ),
+            retry_max_delay=settings.getfloat(
+                "PERSISTENCE_RETRY_MAX_DELAY_SECONDS"
+            ),
         )
 
     def open_spider(self, spider) -> None:
@@ -187,22 +367,36 @@ class MinioPipeline:
             if content_hash:
                 metadata["content-hash"] = content_hash
 
-            existing = _stat_object_or_none(
-                self.client,
-                self.bucket,
-                object_name,
+            existing = _run_storage_operation(
+                lambda: _stat_object_or_none(
+                    self.client,
+                    self.bucket,
+                    object_name,
+                ),
+                spider=spider,
+                operation_name="minio_stat",
+                retry_times=self.retry_times,
+                base_delay=self.retry_base_delay,
+                max_delay=self.retry_max_delay,
             )
             if _metadata_blob_hash(existing) == blob_hash:
                 etag = existing.etag
                 spider.crawler.stats.inc_value("persistence/minio_unchanged")
             else:
-                result = self.client.put_object(
-                    bucket_name=self.bucket,
-                    object_name=object_name,
-                    data=BytesIO(raw_content),
-                    length=len(raw_content),
-                    content_type=content_type,
-                    metadata=metadata,
+                result = _run_storage_operation(
+                    lambda: self.client.put_object(
+                        bucket_name=self.bucket,
+                        object_name=object_name,
+                        data=BytesIO(raw_content),
+                        length=len(raw_content),
+                        content_type=content_type,
+                        metadata=metadata,
+                    ),
+                    spider=spider,
+                    operation_name="minio_put",
+                    retry_times=self.retry_times,
+                    base_delay=self.retry_base_delay,
+                    max_delay=self.retry_max_delay,
                 )
                 etag = result.etag
                 spider.crawler.stats.inc_value(
@@ -232,7 +426,11 @@ class MinioPipeline:
 
 
 class MongoPipeline:
-    """Upsert raw ingestion metadata or fully scraped documents."""
+    """Upsert raw ingestion metadata or fully scraped documents.
+
+    A transient retry repeats the same stable ``record_key`` upsert, so an
+    ambiguous network failure cannot create a duplicate logical document.
+    """
 
     def __init__(
         self,
@@ -241,12 +439,18 @@ class MongoPipeline:
         database: str,
         collection: str,
         timeout_ms: int,
+        retry_times: int = 2,
+        retry_base_delay: float = 0.5,
+        retry_max_delay: float = 5.0,
     ):
         self.enabled = enabled
         self.uri = uri
         self.database_name = database
         self.collection_name = collection
         self.timeout_ms = timeout_ms
+        self.retry_times = retry_times
+        self.retry_base_delay = retry_base_delay
+        self.retry_max_delay = retry_max_delay
         self.client: MongoClient | None = None
         self.collection = None
 
@@ -260,6 +464,13 @@ class MongoPipeline:
             collection=settings.get("MONGO_COLLECTION"),
             timeout_ms=settings.getint(
                 "MONGO_SERVER_SELECTION_TIMEOUT_MS"
+            ),
+            retry_times=settings.getint("PERSISTENCE_RETRY_TIMES"),
+            retry_base_delay=settings.getfloat(
+                "PERSISTENCE_RETRY_BASE_DELAY_SECONDS"
+            ),
+            retry_max_delay=settings.getfloat(
+                "PERSISTENCE_RETRY_MAX_DELAY_SECONDS"
             ),
         )
 
@@ -349,13 +560,20 @@ class MongoPipeline:
         now = datetime.now(timezone.utc)
 
         try:
-            existing = self.collection.find_one(
-                {"record_key": record_key},
-                {
-                    "content_hash": 1,
-                    "blob": 1,
-                    "scraping_status": 1,
-                },
+            existing = _run_storage_operation(
+                lambda: self.collection.find_one(
+                    {"record_key": record_key},
+                    {
+                        "content_hash": 1,
+                        "blob": 1,
+                        "scraping_status": 1,
+                    },
+                ),
+                spider=spider,
+                operation_name="mongodb_find",
+                retry_times=self.retry_times,
+                base_delay=self.retry_base_delay,
+                max_delay=self.retry_max_delay,
             )
             existing_blob = (existing or {}).get("blob") or {}
 
@@ -408,10 +626,17 @@ class MongoPipeline:
                         "scraping_error": "",
                     })
 
-            result = self.collection.update_one(
-                {"record_key": record_key},
-                update,
-                upsert=True,
+            result = _run_storage_operation(
+                lambda: self.collection.update_one(
+                    {"record_key": record_key},
+                    update,
+                    upsert=True,
+                ),
+                spider=spider,
+                operation_name="mongodb_upsert",
+                retry_times=self.retry_times,
+                base_delay=self.retry_base_delay,
+                max_delay=self.retry_max_delay,
             )
 
             if result.upserted_id is not None:
