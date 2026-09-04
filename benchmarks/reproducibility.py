@@ -45,6 +45,7 @@ def capture_reproducibility_metadata(
     """Capture the code, runtime, inputs, and configs behind one benchmark."""
     configurations = configuration_fingerprints(project_root, config_paths)
     requirements_path = project_root / "requirements.txt"
+    installed_distributions = installed_dependency_versions()
 
     return {
         "captured_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -67,7 +68,15 @@ def capture_reproducibility_metadata(
             "machine": platform.machine(),
             "processor": platform.processor(),
             "cpu_count": os.cpu_count(),
-            "dependencies": dependency_versions(),
+            "direct_dependencies": dependency_versions(),
+            "installed_distributions": installed_distributions,
+            "installed_distributions_sha256": hashlib.sha256(
+                json.dumps(
+                    installed_distributions,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest(),
         },
         "source_configuration": {
             "files": configurations,
@@ -158,6 +167,7 @@ def combined_fingerprint(files: list[dict[str, Any]]) -> str:
 
 
 def dependency_versions() -> dict[str, str | None]:
+    """Return exact versions for the project's direct runtime dependencies."""
     versions: dict[str, str | None] = {}
     for distribution in DEPENDENCIES:
         try:
@@ -165,6 +175,16 @@ def dependency_versions() -> dict[str, str | None]:
         except importlib.metadata.PackageNotFoundError:
             versions[distribution] = None
     return versions
+
+
+def installed_dependency_versions() -> dict[str, str]:
+    """Snapshot every installed distribution, including transitive packages."""
+    versions: dict[str, str] = {}
+    for distribution in importlib.metadata.distributions():
+        name = distribution.metadata.get("Name")
+        if name:
+            versions[name] = distribution.version
+    return dict(sorted(versions.items(), key=lambda item: item[0].lower()))
 
 
 def git_state(project_root: Path) -> dict[str, Any]:
