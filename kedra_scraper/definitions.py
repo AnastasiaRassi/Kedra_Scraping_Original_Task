@@ -6,9 +6,7 @@ import tempfile
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
-SOURCE_REGISTRY = load_source_registry(
-    os.getenv("SOURCE_REGISTRY_PATH", "config/sources.json")
-)
+
 from dagster import (
     AssetExecutionContext,
     AssetSelection,
@@ -37,6 +35,9 @@ from kedra_scraper.utils import env_bool, env_csv, env_float, env_int
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
+SOURCE_REGISTRY = load_source_registry(
+    os.getenv("SOURCE_REGISTRY_PATH", "config/sources.json")
+)
 
 MONTHLY_PARTITIONS = MonthlyPartitionsDefinition(
     start_date=os.getenv("DAGSTER_PARTITION_START_DATE", "2000-01-01"),
