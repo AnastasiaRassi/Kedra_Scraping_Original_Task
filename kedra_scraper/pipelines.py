@@ -65,7 +65,7 @@ class MinioPipeline:
         if not self.enabled:
             return
 
-        missing = [
+        missing = [ # looking for missing settings to raise error
             name
             for name, value in (
                 ("MINIO_ENDPOINT", self.endpoint),
@@ -101,8 +101,9 @@ class MinioPipeline:
 
     def process_item(self, item, spider):
         document = ItemAdapter(item).asdict()
+        # item adapter is built into scrapy, it converts the Scrapy yielded item into 
+        # a dictionary regardless of its item type.
         raw_content = document.pop("raw_content", None)
-
         try:
             record_key = _build_record_key(document)
         except (TypeError, ValueError, UnicodeError) as exc:
@@ -135,9 +136,9 @@ class MinioPipeline:
             if source_format == "pdf"
             else "text/html; charset=utf-8"
         )
-        object_name = f"{record_key}.{extension}"
-        if self.prefix:
-            object_name = f"{self.prefix}/{object_name}"
+        object_name = f"{record_key}.{extension}" # like its name.pdf or .html
+        if self.prefix: 
+            object_name = f"{self.prefix}/{object_name}" #dir of documents/object's name 
 
         try:
             blob_hash = hash_document(raw_content)
@@ -148,6 +149,7 @@ class MinioPipeline:
             existing = None
             try:
                 existing = self.client.stat_object(self.bucket, object_name)
+                # stat object helps us get  the object's metadata
             except S3Error as exc:
                 if exc.code not in {"NoSuchKey", "NoSuchObject"}:
                     raise
@@ -163,6 +165,7 @@ class MinioPipeline:
             if existing is not None and existing_hash == blob_hash:
                 etag = existing.etag
                 spider.crawler.stats.inc_value("persistence/minio_unchanged")
+                # inc value increases cnt of the stat key by 1, so we can see how many times we have uploaded unchanged files
             else:
                 metadata = {"blob-hash": blob_hash}
                 content_hash = document.get("content_hash")
@@ -177,7 +180,7 @@ class MinioPipeline:
                     content_type=content_type,
                     metadata=metadata,
                 )
-                etag = result.etag
+                etag = result.etag #storage identifier set by minio
                 spider.crawler.stats.inc_value("persistence/minio_uploaded")
 
         except Exception as exc:
@@ -259,6 +262,8 @@ class MongoPipeline:
             self.client.admin.command("ping")
             database = self.client[self.database_name]
             self.collection = database[self.collection_name]
+            
+            # we'll make indices for faster querying
             self.collection.create_index(
                 [("record_key", ASCENDING)],
                 unique=True,

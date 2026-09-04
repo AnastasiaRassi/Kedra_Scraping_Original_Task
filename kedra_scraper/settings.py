@@ -95,7 +95,7 @@ AUTOTHROTTLE_TARGET_CONCURRENCY = env_float(
 )
 AUTOTHROTTLE_DEBUG = env_bool("SCRAPY_AUTOTHROTTLE_DEBUG", False)
 
-# The MinIO stage also removes internal raw bytes before optional feed export.
+# These numbers just decide the order of pipeline stages.
 ITEM_PIPELINES = {
     "kedra_scraper.pipelines.MinioPipeline": 300,
     "kedra_scraper.pipelines.MongoPipeline": 400,
