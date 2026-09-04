@@ -57,7 +57,7 @@ def load_wrc_source_config(value: str) -> WRCSourceConfig:
     path = resolve_project_path(value)
 
     try:
-        raw = json.loads(path.readtext(encoding="utf-8"))
+        raw = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
         raise ValueError(f"WRC config file does not exist: {path}") from exc
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
