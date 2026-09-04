@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, timedelta
 from io import BytesIO
 from typing import Iterator, Literal
@@ -8,13 +9,18 @@ from urllib.parse import urlencode, urlsplit
 import scrapy
 from pypdf import PdfReader
 
-from kedra_scraper.spiders.WRC_cfg import (
+from kedra_scraper.spiders.wrc_spider_cfg import (
     WRCSourceConfig,
     load_wrc_source_config,
 )
 from kedra_scraper.items import (
     KedraExtractedDocumentItem,
     KedraRawDocumentItem,
+)
+from kedra_scraper.structured_logging import (
+    body_partition_summaries,
+    log_structured,
+    record_body_metric,
 )
 from kedra_scraper.utils import (
     handle_request_error as record_request_error,
@@ -104,6 +110,13 @@ class WRC_IE_Spider(scrapy.Spider):
             partition_date = partition_start.isoformat()
 
             for category_config in self.source_config.body_categories:
+                record_body_metric(
+                    self,
+                    partition_date,
+                    category_config.name,
+                    "found",
+                    count=0,
+                )
                 form = self.source_config.form
                 form_data = {
                     form.start_date_field: partition_start.strftime(
@@ -136,6 +149,13 @@ class WRC_IE_Spider(scrapy.Spider):
             "documents/expected",
             count=len(result_cards),
         )
+        record_body_metric(
+            self,
+            partition_date,
+            category,
+            "found",
+            count=len(result_cards),
+        )
 
         if not result_cards:
             self.logger.debug("No results found at %s", response.url)
@@ -157,9 +177,26 @@ class WRC_IE_Spider(scrapy.Spider):
 
             if not document_href or not title or not published_date:
                 self.crawler.stats.inc_value("documents/incomplete_result")
-                self.logger.warning(
-                    "Skipping an incomplete search result on %s",
-                    response.url,
+                record_body_metric(
+                    self,
+                    partition_date,
+                    category,
+                    "failed",
+                )
+                log_structured(
+                    self.logger,
+                    logging.WARNING,
+                    "incomplete_search_result",
+                    "Skipping an incomplete search result",
+                    partition_date=partition_date,
+                    body=category,
+                    identifier=identifier,
+                    url=response.urljoin(document_href) if document_href else response.url,
+                    status_code=response.status,
+                    error_type="incomplete_metadata",
+                    reason=(
+                        "Missing document link, title, or published date"
+                    ),
                 )
                 continue
 
@@ -269,21 +306,40 @@ class WRC_IE_Spider(scrapy.Spider):
                     content_node = selected
                     break
             content = self._selector_text(content_node)
-        except Exception:
+        except Exception as exc:
             self.crawler.stats.inc_value("errors/html_parsing")
-            self.logger.exception(
-                "HTML parsing failed: identifier=%s url=%s",
-                identifier,
-                response.url,
+            record_body_metric(self, partition_date, category, "failed")
+            log_structured(
+                self.logger,
+                logging.ERROR,
+                "html_extraction_failed",
+                "HTML parsing failed",
+                exc_info=True,
+                partition_date=partition_date,
+                body=category,
+                identifier=identifier,
+                url=response.url,
+                status_code=response.status,
+                error_type=type(exc).__name__,
+                reason=str(exc),
             )
             return
 
         if not content:
             self.crawler.stats.inc_value("errors/html_empty")
-            self.logger.warning(
-                "No HTML document content found: identifier=%s url=%s",
-                identifier,
-                response.url,
+            record_body_metric(self, partition_date, category, "failed")
+            log_structured(
+                self.logger,
+                logging.WARNING,
+                "html_extraction_failed",
+                "No HTML document content found",
+                partition_date=partition_date,
+                body=category,
+                identifier=identifier,
+                url=response.url,
+                status_code=response.status,
+                error_type="empty_html_content",
+                reason="Configured selectors returned no document text",
             )
             return
 
@@ -291,6 +347,8 @@ class WRC_IE_Spider(scrapy.Spider):
             content,
             identifier=identifier,
             url=response.url,
+            partition_date=partition_date,
+            category=category,
         )
         if content_hash is None:
             return
@@ -348,22 +406,40 @@ class WRC_IE_Spider(scrapy.Spider):
                 for page in reader.pages
                 if (text := (page.extract_text() or "").strip())
             )
-        except Exception:
+        except Exception as exc:
             self.crawler.stats.inc_value("errors/pdf_parsing")
-            self.logger.exception(
-                "PDF parsing failed: identifier=%s url=%s",
-                identifier,
-                response.url,
+            record_body_metric(self, partition_date, category, "failed")
+            log_structured(
+                self.logger,
+                logging.ERROR,
+                "pdf_extraction_failed",
+                "PDF parsing failed",
+                exc_info=True,
+                partition_date=partition_date,
+                body=category,
+                identifier=identifier,
+                url=response.url,
+                status_code=response.status,
+                error_type=type(exc).__name__,
+                reason=str(exc),
             )
             return
 
         if not content:
             self.crawler.stats.inc_value("errors/pdf_empty")
-            self.logger.warning(
-                "No extractable PDF text found: identifier=%s url=%s; "
-                "the document may be scanned",
-                identifier,
-                response.url,
+            record_body_metric(self, partition_date, category, "failed")
+            log_structured(
+                self.logger,
+                logging.WARNING,
+                "pdf_extraction_failed",
+                "No extractable PDF text found",
+                partition_date=partition_date,
+                body=category,
+                identifier=identifier,
+                url=response.url,
+                status_code=response.status,
+                error_type="empty_pdf_content",
+                reason="The PDF may be scanned and require OCR",
             )
             return
 
@@ -371,6 +447,8 @@ class WRC_IE_Spider(scrapy.Spider):
             content,
             identifier=identifier,
             url=response.url,
+            partition_date=partition_date,
+            category=category,
         )
         if content_hash is None:
             return
@@ -423,16 +501,28 @@ class WRC_IE_Spider(scrapy.Spider):
         content: str,
         identifier: str | None,
         url: str,
+        partition_date: str,
+        category: str,
     ) -> str | None:
         """Hash extracted content while accounting for unexpected failures."""
         try:
             return hash_document(content)
-        except (TypeError, ValueError, UnicodeError):
+        except (TypeError, ValueError, UnicodeError) as exc:
             self.crawler.stats.inc_value("errors/document_hashing")
-            self.logger.exception(
-                "Document hashing failed: identifier=%s url=%s",
-                identifier,
-                url,
+            record_body_metric(self, partition_date, category, "failed")
+            log_structured(
+                self.logger,
+                logging.ERROR,
+                "content_hash_failed",
+                "Document content hashing failed",
+                exc_info=True,
+                partition_date=partition_date,
+                body=category,
+                identifier=identifier,
+                url=url,
+                status_code=None,
+                error_type=type(exc).__name__,
+                reason=str(exc),
             )
             return None
 
@@ -535,6 +625,7 @@ class WRC_IE_Spider(scrapy.Spider):
                 "persistence/mongodb_unchanged",
                 0,
             ),
+            "body_partitions": body_partition_summaries(self),
         }
 
         summary_path = self.settings.get("CRAWL_SUMMARY_PATH")
@@ -547,32 +638,34 @@ class WRC_IE_Spider(scrapy.Spider):
                     summary_path,
                 )
 
-        self.logger.info(
-            "CRAWL SUMMARY: reason=%s expected=%d scraped=%d "
-            "request_failed=%d search_request_failed=%d "
-            "extraction_failed=%d "
-            "incomplete_results=%d dropped=%d missing=%d unexplained=%d",
-            reason,
-            expected,
-            scraped,
-            request_failed,
-            search_request_failed,
-            extraction_failed,
-            incomplete_results,
-            dropped,
-            missing,
-            unexplained_missing,
+        for body_summary in summary["body_partitions"]:
+            log_structured(
+                self.logger,
+                logging.INFO,
+                "body_partition_summary",
+                "Body partition completed",
+                **body_summary,
+            )
+
+        log_structured(
+            self.logger,
+            logging.INFO,
+            "crawl_summary",
+            "Crawl completed",
+            **summary,
         )
 
         if missing:
-            self.logger.warning(
-                "Crawl finished with missing documents: expected=%d "
-                "scraped=%d missing=%d explained=%d unexplained=%d",
-                expected,
-                scraped,
-                missing,
-                min(explained_missing, missing),
-                unexplained_missing,
+            log_structured(
+                self.logger,
+                logging.WARNING,
+                "crawl_incomplete",
+                "Crawl finished with missing documents",
+                expected=expected,
+                scraped=scraped,
+                missing=missing,
+                explained_missing=min(explained_missing, missing),
+                unexplained_missing=unexplained_missing,
             )
 
     def _parse_scraped_date(self, value: str, argument_name: str) -> date:
