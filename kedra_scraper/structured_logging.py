@@ -152,6 +152,10 @@ class StructuredLoggingExtension:
             signal=signals.spider_closed,
         )
         crawler.signals.connect(
+            self.engine_stopped,
+            signal=signals.engine_stopped,
+        )
+        crawler.signals.connect(
             self.item_scraped,
             signal=signals.item_scraped,
         )
@@ -212,10 +216,17 @@ class StructuredLoggingExtension:
             spider.logger,
             logging.INFO,
             "structured_log_closed",
-            "Structured crawl log closed",
+            "Structured crawl log closing",
             path=str(self.log_path),
             reason=reason,
         )
+        self.file_handler.flush()
+
+    def engine_stopped(self) -> None:
+        # Engine shutdown happens after all spider_closed receivers, so crawl
+        # summaries emitted by other extensions are retained before detaching.
+        if self.file_handler is None:
+            return
         self.file_handler.flush()
         logging.getLogger().removeHandler(self.file_handler)
         self.file_handler.close()
