@@ -8,8 +8,14 @@ from urllib.parse import urlencode, urlsplit
 import scrapy
 from pypdf import PdfReader
 
-from kedra_scraper.config import WRCSourceConfig, load_wrc_source_config
-from kedra_scraper.items import KedraRawDocumentItem, KedraScraperItem
+from kedra_scraper.spiders.WRC_cfg import (
+    WRCSourceConfig,
+    load_wrc_source_config,
+)
+from kedra_scraper.items import (
+    KedraExtractedDocumentItem,
+    KedraRawDocumentItem,
+)
 from kedra_scraper.utils import (
     handle_request_error as record_request_error,
     hash_document,
@@ -290,7 +296,7 @@ class WRC_IE_Spider(scrapy.Spider):
             return
 
         self.crawler.stats.inc_value("documents/html_extracted")
-        yield KedraScraperItem(
+        yield KedraExtractedDocumentItem(
             title=title,
             published_date=published_date,
             partition_date=partition_date,
@@ -370,7 +376,7 @@ class WRC_IE_Spider(scrapy.Spider):
             return
 
         self.crawler.stats.inc_value("documents/pdf_extracted")
-        yield KedraScraperItem(
+        yield KedraExtractedDocumentItem(
             title=title,
             published_date=published_date,
             partition_date=partition_date,
