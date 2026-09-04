@@ -32,6 +32,21 @@ if SCRAPE_MODE not in {"full", "ingestion"}:
 CRAWL_SUMMARY_PATH = os.getenv("CRAWL_SUMMARY_PATH")
 CRAWL_PROFILE_PATH = os.getenv("CRAWL_PROFILE_PATH")
 
+# Durable structured logs. An explicit path is supplied by Dagster and the
+# profiler; standalone Scrapy runs derive a unique path below this directory.
+STRUCTURED_LOG_DIR = os.getenv("SCRAPY_LOG_DIR", "logs")
+STRUCTURED_LOG_PATH = os.getenv("SCRAPY_STRUCTURED_LOG_PATH")
+STRUCTURED_LOG_MAX_BYTES = env_int(
+    "SCRAPY_LOG_MAX_BYTES",
+    25_000_000,
+    minimum=1,
+)
+STRUCTURED_LOG_BACKUP_COUNT = env_int(
+    "SCRAPY_LOG_BACKUP_COUNT",
+    5,
+    minimum=0,
+)
+
 # Request identity, output and protocol behaviour.
 USER_AGENT = os.getenv("SCRAPY_USER_AGENT", "KedraScraper/1.0")
 LOG_LEVEL = os.getenv("SCRAPY_LOG_LEVEL", "INFO").upper()
