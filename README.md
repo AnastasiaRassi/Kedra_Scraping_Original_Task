@@ -233,11 +233,24 @@ When `--max-items` stops a sampled crawl, the report leaves
 `unexplained_missing` unevaluated because the crawl was intentionally
 incomplete. Use an uncapped representative partition to assess completeness.
 
-The deterministic profiler calculations can be tested without contacting a
-website:
+The deterministic profiler calculations and failure handling can be tested
+without contacting a website:
 
 ```powershell
 python -m unittest discover -s tests -v
+```
+
+The request-failure tests inject retryable timeouts and final HTTP/timeout
+failures. They verify that three configured retries create three replacement
+requests, the next failure is marked exhausted, and final failures preserve
+their URL, HTTP status when available, exact reason, and body/month
+reconciliation counters. The timeout test is simulated and does not actually
+wait 30 seconds.
+
+To run only these tests:
+
+```powershell
+python -m unittest discover -s tests -p "test_request_failures.py" -v
 ```
 
 Live profiles are operational measurements rather than normal CI tests:
