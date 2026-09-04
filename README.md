@@ -377,6 +377,25 @@ documents have been attempted.
 Subprocess output is captured so legal-document text does not flood the
 Dagster logs. On failure, only the configured tail is emitted.
 
+## Structured logging and reconciliation
+
+Scrapy log records are emitted as one JSON object per line. Crawl-specific
+events include queryable fields such as `partition_date`, `body`,
+`identifier`, `url`, `status_code`, `error_type`, and `reason`.
+
+Every body/month pair tracks:
+
+- `found`: result cards discovered
+- `succeeded`: items that completed all enabled item pipelines
+- `failed`: incomplete results, exhausted downloads, extraction failures,
+  or dropped items
+- `request_failures`: document or search requests that exhausted retries
+
+The final crawl summary contains a `body_partitions` array and emits one
+`body_partition_summary` event per pair. This makes it possible to reconcile
+found, successful, and failed documents without reading human-oriented log
+messages.
+
 ## Verified WRC crawl
 
 A complete direct test over `01-01-2008` through `31-03-2008` produced:
