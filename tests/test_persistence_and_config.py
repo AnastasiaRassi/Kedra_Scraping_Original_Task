@@ -7,7 +7,7 @@ from hashlib import sha256
 from pathlib import Path
 from types import SimpleNamespace
 
-from kedra_scraper.config import load_source_registry
+from kedra_scraper.config import apply_source_settings, load_source_registry
 
 try:
     from kedra_scraper.pipelines import (
@@ -51,6 +51,15 @@ class _Spider:
     def __init__(self) -> None:
         self.crawler = SimpleNamespace(stats=_Stats())
         self.logger = _Logger()
+
+
+class _Settings(dict):
+    def __init__(self, **values) -> None:
+        super().__init__(values)
+        self.applied: dict[str, tuple[str, str]] = {}
+
+    def set(self, name: str, value: str, priority: str) -> None:
+        self.applied[name] = (value, priority)
 
 
 class _ExistingMinioClient:
@@ -223,7 +232,8 @@ class SiteConfigTests(unittest.TestCase):
                                 "spider": "example_spider",
                                 "source": "https://example.test",
                                 "spider_settings": {
-                                    "EXAMPLE_CONFIG_PATH": str(site_config_path)
+                                    "EXAMPLE_CONFIG_PATH": str(site_config_path),
+                                    "CONCURRENT_REQUESTS_PER_DOMAIN": "5",
                                 },
                                 "site_config_setting": "EXAMPLE_CONFIG_PATH",
                             }
@@ -234,11 +244,17 @@ class SiteConfigTests(unittest.TestCase):
             )
 
             source = load_source_registry(str(registry_path))["example"]
+            settings = _Settings(SOURCE_REGISTRY_PATH=str(registry_path))
+            apply_source_settings(settings, "example")
 
         self.assertEqual(source.site_config_path, str(site_config_path))
         self.assertEqual(
             source.html_content_selectors,
             ("main article", "div.document"),
+        )
+        self.assertEqual(
+            settings.applied["CONCURRENT_REQUESTS_PER_DOMAIN"],
+            ("5", "spider"),
         )
 
 
