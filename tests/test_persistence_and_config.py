@@ -15,12 +15,15 @@ try:
         MongoPipeline,
         _build_blob_history_entry,
         _build_blob_object_name,
+        _build_current_blob_object_name,
     )
+    from kedra_scraper.scraping import _download_blob
 except ModuleNotFoundError as exc:
     persistence_dependencies = {
         "itemadapter",
         "minio",
         "pymongo",
+        "pypdf",
         "scrapy",
         "twisted",
     }
@@ -65,17 +68,57 @@ class _Settings(dict):
 class _ExistingMinioClient:
     def __init__(self, blob_hash: str) -> None:
         self.blob_hash = blob_hash
-        self.object_name: str | None = None
+        self.object_names: list[str] = []
 
     def stat_object(self, bucket: str, object_name: str):
-        self.object_name = object_name
+        self.object_names.append(object_name)
         return SimpleNamespace(
             metadata={"x-amz-meta-blob-hash": self.blob_hash},
             etag="existing-etag",
         )
 
     def put_object(self, **kwargs):
-        raise AssertionError("An existing content version must not be uploaded")
+        raise AssertionError("Unchanged objects must not be uploaded")
+
+
+class _ChangedCurrentMinioClient:
+    def __init__(self, blob_hash: str) -> None:
+        self.blob_hash = blob_hash
+        self.uploaded: list[str] = []
+
+    def stat_object(self, bucket: str, object_name: str):
+        stored_hash = (
+            "previous-hash" if object_name.endswith("/current")
+            else self.blob_hash
+        )
+        return SimpleNamespace(
+            metadata={"x-amz-meta-blob-hash": stored_hash},
+            etag="existing-etag",
+        )
+
+    def put_object(self, **kwargs):
+        self.uploaded.append(kwargs["object_name"])
+        return SimpleNamespace(etag="updated-etag")
+
+
+class _BlobResponse:
+    def read(self) -> bytes:
+        return b"version bytes"
+
+    def close(self) -> None:
+        pass
+
+    def release_conn(self) -> None:
+        pass
+
+
+class _BlobClient:
+    def __init__(self) -> None:
+        self.object_key: str | None = None
+
+    def get_object(self, bucket: str, object_key: str):
+        self.object_key = object_key
+        return _BlobResponse()
 
 
 class _MongoCollection:
@@ -103,6 +146,10 @@ class PersistenceHistoryTests(unittest.TestCase):
         self.assertEqual(first, "documents/record/aaa.pdf")
         self.assertEqual(second, "documents/record/bbb.pdf")
         self.assertNotEqual(first, second)
+        self.assertEqual(
+            _build_current_blob_object_name("record", "documents"),
+            "documents/record/current",
+        )
 
     def test_existing_blob_version_is_reused(self) -> None:
         raw_content = b"unchanged source bytes"
@@ -130,16 +177,54 @@ class PersistenceHistoryTests(unittest.TestCase):
             _Spider(),
         )
 
+        version_object = (
+            f"documents/{document['record_key']}/{blob_hash}.pdf"
+        )
+        current_object = f"documents/{document['record_key']}/current"
+        self.assertEqual(client.object_names, [version_object, current_object])
+        self.assertEqual(document["blob"]["object_key"], current_object)
         self.assertEqual(
-            client.object_name,
-            f"documents/{document['record_key']}/{blob_hash}.pdf",
+            document["blob"]["version_object_key"],
+            version_object,
         )
         self.assertEqual(document["blob"]["sha256"], blob_hash)
+
+    def test_changed_blob_overwrites_only_the_current_object(self) -> None:
+        raw_content = b"new source bytes"
+        blob_hash = sha256(raw_content).hexdigest()
+        client = _ChangedCurrentMinioClient(blob_hash)
+        pipeline = MinioPipeline(
+            enabled=True,
+            endpoint="unused",
+            access_key="unused",
+            secret_key="unused",
+            secure=False,
+            bucket="raw-documents",
+            prefix="documents",
+        )
+        pipeline.client = client
+
+        document = pipeline.process_item(
+            {
+                "source": "https://example.test",
+                "landing_url": "https://example.test/document/1",
+                "doc_url": "https://example.test/document/1.pdf",
+                "source_format": "pdf",
+                "raw_content": raw_content,
+            },
+            _Spider(),
+        )
+
+        self.assertEqual(
+            client.uploaded,
+            [f"documents/{document['record_key']}/current"],
+        )
 
     def test_mongodb_adds_stable_blob_history_entry(self) -> None:
         blob = {
             "bucket": "raw-documents",
-            "object_key": "documents/record/hash.html",
+            "object_key": "documents/record/current",
+            "version_object_key": "documents/record/hash.html",
             "etag": "storage-specific-etag",
             "content_type": "text/html; charset=utf-8",
             "size_bytes": 42,
@@ -163,6 +248,7 @@ class PersistenceHistoryTests(unittest.TestCase):
         self.assertIsNotNone(collection.update)
         history = collection.update["$addToSet"]["blob_history"]["$each"]
         self.assertEqual(history, [_build_blob_history_entry(blob)])
+        self.assertEqual(history[0]["object_key"], blob["version_object_key"])
         self.assertNotIn("etag", history[0])
         self.assertEqual(collection.update["$set"]["blob"], blob)
 
@@ -177,7 +263,8 @@ class PersistenceHistoryTests(unittest.TestCase):
         }
         current_blob = {
             "bucket": "raw-documents",
-            "object_key": "documents/record/new-hash.html",
+            "object_key": "documents/record/current",
+            "version_object_key": "documents/record/new-hash.html",
             "etag": "new-etag",
             "content_type": "text/html; charset=utf-8",
             "size_bytes": 12,
@@ -206,6 +293,20 @@ class PersistenceHistoryTests(unittest.TestCase):
                 _build_blob_history_entry(current_blob),
             ],
         )
+
+    def test_scraper_reads_the_immutable_version(self) -> None:
+        client = _BlobClient()
+        content = _download_blob(
+            client,
+            {
+                "bucket": "raw-documents",
+                "object_key": "documents/record/current",
+                "version_object_key": "documents/record/hash.html",
+            },
+        )
+
+        self.assertEqual(content, b"version bytes")
+        self.assertEqual(client.object_key, "documents/record/hash.html")
 
 
 class SiteConfigTests(unittest.TestCase):

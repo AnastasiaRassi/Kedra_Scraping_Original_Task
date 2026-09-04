@@ -372,6 +372,10 @@ MongoDB has a unique index on `record_key`.
 MinIO object names are deterministic:
 
 ```text
+# Stable current object: overwritten when the source bytes or format change
+documents/{record_key}/current
+
+# Immutable historical versions: never overwritten
 documents/{record_key}/{blob_sha256}.html
 documents/{record_key}/{blob_sha256}.pdf
 ```
@@ -379,11 +383,15 @@ documents/{record_key}/{blob_sha256}.pdf
 Reruns are safe:
 
 - Unchanged MinIO bytes are not uploaded again.
-- Changed raw bytes create a new content-addressed object; older objects are
-  never overwritten.
+- Changed raw bytes overwrite the stable `current` object, providing MinIO
+  upsert behavior.
+- The same changed bytes are also stored under their SHA-256 object name, so
+  older historical versions are never overwritten.
 - MongoDB upserts rather than inserting a duplicate.
-- MongoDB's current `blob` field points to the newest observed version, while
-  `blob_history` retains one stable reference for every distinct raw version.
+- MongoDB's current `blob.object_key` points to the stable current object and
+  `blob.version_object_key` points to its exact immutable version.
+- `blob_history` retains one immutable reference for every distinct raw
+  version.
 - Raw records become `pending` only when new or when their blob changes.
 - `scraped_documents` skips a completed record when its scraped blob hash still
   matches the current raw blob.

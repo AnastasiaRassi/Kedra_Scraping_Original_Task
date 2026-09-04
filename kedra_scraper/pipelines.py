@@ -37,18 +37,45 @@ def _build_blob_object_name(
     return f"{prefix}/{object_name}" if prefix else object_name
 
 
+def _build_current_blob_object_name(
+    record_key: str,
+    prefix: str,
+) -> str:
+    """Build the stable MinIO object name used for the latest version."""
+    object_name = f"{record_key}/current"
+    return f"{prefix}/{object_name}" if prefix else object_name
+
+
 def _build_blob_history_entry(blob: dict) -> dict:
-    """Return stable blob fields suitable for MongoDB's $addToSet."""
+    """Return an immutable blob reference for MongoDB's $addToSet."""
     return {
-        key: blob[key]
-        for key in (
-            "bucket",
-            "object_key",
-            "content_type",
-            "size_bytes",
-            "sha256",
-        )
+        "bucket": blob["bucket"],
+        "object_key": (
+            blob.get("version_object_key") or blob["object_key"]
+        ),
+        "content_type": blob["content_type"],
+        "size_bytes": blob["size_bytes"],
+        "sha256": blob["sha256"],
     }
+
+
+def _stat_object_or_none(client: Minio, bucket: str, object_name: str):
+    try:
+        return client.stat_object(bucket, object_name)
+    except S3Error as exc:
+        if exc.code not in {"NoSuchKey", "NoSuchObject"}:
+            raise
+        return None
+
+
+def _metadata_blob_hash(stat_result) -> str | None:
+    if stat_result is None:
+        return None
+    return (
+        stat_result.metadata.get("x-amz-meta-blob-hash")
+        or stat_result.metadata.get("X-Amz-Meta-Blob-Hash")
+        or stat_result.metadata.get("blob-hash")
+    )
 
 
 class MinioPipeline:
@@ -161,74 +188,95 @@ class MinioPipeline:
             if source_format == "pdf"
             else "text/html; charset=utf-8"
         )
-        object_name = "<unresolved>"
+        version_object_name = "<unresolved>"
+        current_object_name = "<unresolved>"
         try:
             blob_hash = hash_document(raw_content)
-            object_name = _build_blob_object_name(
+            version_object_name = _build_blob_object_name(
                 record_key,
                 blob_hash,
                 extension,
+                self.prefix,
+            )
+            current_object_name = _build_current_blob_object_name(
+                record_key,
                 self.prefix,
             )
 
             if self.client is None:
                 raise RuntimeError("MinIO client was not initialised")
 
-            existing = None
-            try:
-                existing = self.client.stat_object(self.bucket, object_name)
-                # stat object helps us get  the object's metadata
-            except S3Error as exc:
-                if exc.code not in {"NoSuchKey", "NoSuchObject"}:
-                    raise
+            metadata = {"blob-hash": blob_hash}
+            content_hash = document.get("content_hash")
+            if content_hash:
+                metadata["content-hash"] = content_hash
 
-            existing_hash = None
-            if existing is not None:
-                existing_hash = (
-                    existing.metadata.get("x-amz-meta-blob-hash")
-                    or existing.metadata.get("X-Amz-Meta-Blob-Hash")
-                    or existing.metadata.get("blob-hash")
-                )
-
-            if existing is not None and existing_hash != blob_hash:
+            existing_version = _stat_object_or_none(
+                self.client,
+                self.bucket,
+                version_object_name,
+            )
+            if (
+                existing_version is not None
+                and _metadata_blob_hash(existing_version) != blob_hash
+            ):
                 raise RuntimeError(
                     "Content-addressed MinIO object has unexpected blob hash"
                 )
 
-            if existing is not None:
-                etag = existing.etag
+            if existing_version is not None:
                 spider.crawler.stats.inc_value("persistence/minio_unchanged")
-                # inc value increases cnt of the stat key by 1, so we can see how many times we have uploaded unchanged files
             else:
-                metadata = {"blob-hash": blob_hash}
-                content_hash = document.get("content_hash")
-                if content_hash:
-                    metadata["content-hash"] = content_hash
-
-                result = self.client.put_object(
+                self.client.put_object(
                     bucket_name=self.bucket,
-                    object_name=object_name,
+                    object_name=version_object_name,
                     data=BytesIO(raw_content),
                     length=len(raw_content),
                     content_type=content_type,
                     metadata=metadata,
                 )
-                etag = result.etag #storage identifier set by minio
                 spider.crawler.stats.inc_value("persistence/minio_uploaded")
+
+            existing_current = _stat_object_or_none(
+                self.client,
+                self.bucket,
+                current_object_name,
+            )
+            if _metadata_blob_hash(existing_current) == blob_hash:
+                current_etag = existing_current.etag
+                spider.crawler.stats.inc_value(
+                    "persistence/minio_current_unchanged"
+                )
+            else:
+                result = self.client.put_object(
+                    bucket_name=self.bucket,
+                    object_name=current_object_name,
+                    data=BytesIO(raw_content),
+                    length=len(raw_content),
+                    content_type=content_type,
+                    metadata=metadata,
+                )
+                current_etag = result.etag
+                spider.crawler.stats.inc_value(
+                    "persistence/minio_current_upserted"
+                )
 
         except Exception as exc:
             spider.crawler.stats.inc_value("errors/minio_write")
             spider.logger.exception(
-                "MinIO persistence failed: record_key=%s object=%s",
+                "MinIO persistence failed: record_key=%s "
+                "version_object=%s current_object=%s",
                 record_key,
-                object_name,
+                version_object_name,
+                current_object_name,
             )
             raise DropItem("MinIO persistence failed") from exc
 
         document["blob"] = {
             "bucket": self.bucket,
-            "object_key": object_name,
-            "etag": etag,
+            "object_key": current_object_name,
+            "version_object_key": version_object_name,
+            "etag": current_etag,
             "content_type": content_type,
             "size_bytes": len(raw_content),
             "sha256": blob_hash,
