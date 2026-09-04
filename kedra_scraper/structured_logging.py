@@ -50,12 +50,15 @@ def log_structured(
     level: int,
     event: str,
     message: str,
+    *,
+    exc_info: bool = False,
     **fields: Any,
 ) -> None:
     """Emit a JSON-formatted event with queryable contextual fields."""
     logger.log(
         level,
         message,
+        exc_info=exc_info,
         extra={
             "event": event,
             "structured_fields": fields,
