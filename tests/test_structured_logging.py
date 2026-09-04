@@ -118,6 +118,7 @@ class StructuredLoggingTests(unittest.TestCase):
                 url="https://example.test/document",
             )
             extension.spider_closed(spider, "finished")
+            extension.engine_stopped()
 
             rows = [
                 json.loads(line)
