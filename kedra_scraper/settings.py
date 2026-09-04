@@ -14,6 +14,10 @@ NEWSPIDER_MODULE = "kedra_scraper.spiders"
 ADDONS = {}
 
 # Source and partition configuration.
+SOURCE_REGISTRY_PATH = os.getenv(
+    "SOURCE_REGISTRY_PATH",
+    "config/sources.json",
+)
 WRC_CONFIG_PATH = os.getenv("WRC_CONFIG_PATH", "config/wrc.json")
 SCRAPE_START_DATE = os.getenv("SCRAPE_START_DATE")
 SCRAPE_END_DATE = os.getenv("SCRAPE_END_DATE")
@@ -47,6 +51,10 @@ DEFAULT_REQUEST_HEADERS = {
     "Accept-Language": os.getenv("SCRAPY_ACCEPT_LANGUAGE", "en"),
 }
 
+# Conservative cross-site fallbacks. A spider may load benchmarked overrides
+# from config/sources.json. Do not raise these global defaults based on one
+# website's benchmark because every host has different capacity and limits.
+# Explicit command-line settings (-s NAME=VALUE) still take highest priority.
 # Concurrency, throttling and resilience.
 CONCURRENT_REQUESTS = env_int(
     "SCRAPY_CONCURRENT_REQUESTS",
@@ -55,12 +63,12 @@ CONCURRENT_REQUESTS = env_int(
 )
 CONCURRENT_REQUESTS_PER_DOMAIN = env_int(
     "SCRAPY_CONCURRENT_REQUESTS_PER_DOMAIN",
-    4,
+    2,
     minimum=1,
 )
 DOWNLOAD_DELAY = env_float(
     "SCRAPY_DOWNLOAD_DELAY",
-    0.1,
+    0.5,
     minimum=0.0,
 )
 RANDOMIZE_DOWNLOAD_DELAY = env_bool(
@@ -90,7 +98,7 @@ AUTOTHROTTLE_MAX_DELAY = env_float(
 )
 AUTOTHROTTLE_TARGET_CONCURRENCY = env_float(
     "SCRAPY_AUTOTHROTTLE_TARGET_CONCURRENCY",
-    2.0,
+    1.0,
     minimum=0.001,
 )
 AUTOTHROTTLE_DEBUG = env_bool("SCRAPY_AUTOTHROTTLE_DEBUG", False)
