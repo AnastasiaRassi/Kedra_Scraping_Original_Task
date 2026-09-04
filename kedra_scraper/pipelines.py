@@ -262,7 +262,7 @@ class MongoPipeline:
             self.client.admin.command("ping")
             database = self.client[self.database_name]
             self.collection = database[self.collection_name]
-            
+
             # we'll make indices for faster querying
             self.collection.create_index(
                 [("record_key", ASCENDING)],
@@ -300,9 +300,9 @@ class MongoPipeline:
 
         if not self.enabled:
             return document
-
-        record_key = document.get("record_key")
-        blob = document.get("blob")
+ 
+        record_key = document.get("record_key") # made in the prior pipeline above
+        blob = document.get("blob") # produced as well in the prior pipeline
         if not record_key or not isinstance(blob, dict):
             spider.crawler.stats.inc_value("errors/mongodb_payload")
             spider.logger.error(
@@ -332,7 +332,7 @@ class MongoPipeline:
                 existing is None
                 or existing_blob.get("sha256") != blob.get("sha256")
             )
-            is_scraped = bool(document.get("content_hash"))
+            has_extracted_content  = bool(document.get("content_hash"))
 
             document["last_seen_at"] = now
             document["ingested_at"] = now
@@ -341,7 +341,7 @@ class MongoPipeline:
                 "$setOnInsert": {"created_at": now},
             }
 
-            if is_scraped:
+            if has_extracted_content :
                 content_changed = (
                     existing is None
                     or existing.get("content_hash") != document["content_hash"]
