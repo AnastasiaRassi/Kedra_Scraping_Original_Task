@@ -37,6 +37,7 @@ def main(argv: list[str] | None = None) -> int:
     if not destination.is_absolute():
         destination = PROJECT_ROOT / destination
     destination.parent.mkdir(parents=True, exist_ok=True)
+    structured_log_path = _profile_log_path(destination)
 
     settings = dict(source_settings)
     settings.update(overrides)
@@ -47,6 +48,7 @@ def main(argv: list[str] | None = None) -> int:
             "LOG_LEVEL": args.log_level.upper(),
         }
     )
+    settings.setdefault("STRUCTURED_LOG_PATH", str(structured_log_path))
     settings["PERSISTENCE_ENABLED"] = (
         "true" if args.with_persistence else "false"
     )
@@ -60,6 +62,7 @@ def main(argv: list[str] | None = None) -> int:
         command.extend(("-s", f"{name}={value}"))
 
     print(f"Profiling spider={spider} source={source or 'direct'}")
+    print(f"Structured log: {settings['STRUCTURED_LOG_PATH']}")
     completed = subprocess.run(command, cwd=PROJECT_ROOT, check=False)
 
     if destination.exists():
@@ -186,6 +189,13 @@ def _parser() -> argparse.ArgumentParser:
     )
     return parser
 
+
+
+def _profile_log_path(profile_path: Path) -> Path:
+    root = Path(os.getenv("SCRAPY_LOG_DIR", "logs")).expanduser()
+    if not root.is_absolute():
+        root = PROJECT_ROOT / root
+    return root / "profiles" / f"{profile_path.stem}.jsonl"
 
 def _default_destination(label: str) -> Path:
     safe_label = re.sub(r"[^A-Za-z0-9_.-]+", "_", label)
