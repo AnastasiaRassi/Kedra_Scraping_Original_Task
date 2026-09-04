@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import re
 from datetime import datetime, timezone
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 from typing import Any, Mapping
 
 from itemadapter import ItemAdapter
@@ -10,6 +14,7 @@ from scrapy import signals
 
 
 _BODY_METRICS = ("found", "succeeded", "failed", "request_failures")
+_SAFE_PATH_COMPONENT = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
 class JsonLogFormatter(logging.Formatter):
@@ -66,6 +71,23 @@ def log_structured(
     )
 
 
+def default_structured_log_path(
+    directory: str | Path,
+    spider_name: str,
+    *,
+    timestamp: datetime | None = None,
+    process_id: int | None = None,
+) -> Path:
+    """Build a collision-resistant path for a standalone Scrapy crawl."""
+    moment = timestamp or datetime.now(timezone.utc)
+    safe_name = _SAFE_PATH_COMPONENT.sub("_", spider_name).strip("._") or "spider"
+    filename = (
+        f"{moment.astimezone(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}_"
+        f"{process_id if process_id is not None else os.getpid()}.jsonl"
+    )
+    return Path(directory).expanduser() / safe_name / filename
+
+
 def record_body_metric(
     spider,
     partition_date: str | None,
@@ -110,14 +132,25 @@ def body_partition_summaries(spider) -> list[dict[str, Any]]:
 
 
 class StructuredLoggingExtension:
-    """Enable JSON logs and observe item-level pipeline outcomes."""
+    """Write Scrapy events to the console and a rotating JSONL file."""
 
     def __init__(self, crawler) -> None:
         self.crawler = crawler
-        formatter = JsonLogFormatter()
-        for handler in logging.getLogger().handlers:
-            handler.setFormatter(formatter)
+        self.formatter = JsonLogFormatter()
+        self.file_handler: RotatingFileHandler | None = None
+        self.log_path: Path | None = None
 
+        for handler in logging.getLogger().handlers:
+            handler.setFormatter(self.formatter)
+
+        crawler.signals.connect(
+            self.spider_opened,
+            signal=signals.spider_opened,
+        )
+        crawler.signals.connect(
+            self.spider_closed,
+            signal=signals.spider_closed,
+        )
         crawler.signals.connect(
             self.item_scraped,
             signal=signals.item_scraped,
@@ -130,6 +163,63 @@ class StructuredLoggingExtension:
     @classmethod
     def from_crawler(cls, crawler):
         return cls(crawler)
+
+    def spider_opened(self, spider) -> None:
+        configured_path = self.crawler.settings.get("STRUCTURED_LOG_PATH")
+        self.log_path = (
+            Path(configured_path).expanduser()
+            if configured_path
+            else default_structured_log_path(
+                self.crawler.settings.get("STRUCTURED_LOG_DIR", "logs"),
+                spider.name,
+            )
+        )
+        if not self.log_path.is_absolute():
+            self.log_path = Path.cwd() / self.log_path
+        self.log_path.parent.mkdir(parents=True, exist_ok=True)
+
+        self.file_handler = RotatingFileHandler(
+            self.log_path,
+            maxBytes=self.crawler.settings.getint(
+                "STRUCTURED_LOG_MAX_BYTES",
+                25_000_000,
+            ),
+            backupCount=self.crawler.settings.getint(
+                "STRUCTURED_LOG_BACKUP_COUNT",
+                5,
+            ),
+            encoding="utf-8",
+        )
+        self.file_handler.setLevel(self.crawler.settings.get("LOG_LEVEL", "INFO"))
+        self.file_handler.setFormatter(self.formatter)
+        logging.getLogger().addHandler(self.file_handler)
+        self.crawler.stats.set_value(
+            "logging/structured_log_path",
+            str(self.log_path),
+        )
+        log_structured(
+            spider.logger,
+            logging.INFO,
+            "structured_log_started",
+            "Structured crawl log opened",
+            path=str(self.log_path),
+        )
+
+    def spider_closed(self, spider, reason: str) -> None:
+        if self.file_handler is None:
+            return
+        log_structured(
+            spider.logger,
+            logging.INFO,
+            "structured_log_closed",
+            "Structured crawl log closed",
+            path=str(self.log_path),
+            reason=reason,
+        )
+        self.file_handler.flush()
+        logging.getLogger().removeHandler(self.file_handler)
+        self.file_handler.close()
+        self.file_handler = None
 
     def item_scraped(self, item, response, spider) -> None:
         document = ItemAdapter(item)
