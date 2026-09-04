@@ -82,6 +82,24 @@ def load_source_registry(value: str) -> dict[str, SourceRegistryEntry]:
     return registry
 
 
+def apply_source_settings(settings: Any, source_key: str) -> None:
+    """Apply a source's registry overrides at Scrapy's spider priority."""
+    registry_path = settings.get("SOURCE_REGISTRY_PATH") or "config/sources.json"
+    registry = load_source_registry(str(registry_path))
+    try:
+        source = registry[source_key]
+    except KeyError as exc:
+        available = ", ".join(sorted(registry))
+        raise ValueError(
+            f"Unknown source {source_key!r}. Available sources: {available}"
+        ) from exc
+
+    # These measured per-site values override conservative project defaults.
+    # Explicit command-line -s settings remain higher priority.
+    for name, value in source.spider_settings.items():
+        settings.set(name, value, priority="spider")
+
+
 def load_html_content_selectors(value: str) -> tuple[str, ...]:
     """Load generic extraction selectors from a site's own config file."""
     path = resolve_project_path(value)
