@@ -194,8 +194,17 @@ def _build_record_key(document: dict) -> str:
 def _build_blob_object_name(
     record_key: str,
     prefix: str,
+    source_format: str,
 ) -> str:
-    """Build the stable MinIO key for one logical source document."""
+    """Build a flat MinIO filename for one logical source document."""
+    if source_format not in {"html", "pdf"}:
+        raise ValueError("source_format must be either 'html' or 'pdf'")
+    object_name = f"{record_key}.{source_format}"
+    return f"{prefix}/{object_name}" if prefix else object_name
+
+
+def _build_legacy_blob_object_name(record_key: str, prefix: str) -> str:
+    """Return the superseded key that MinIO displays as a hash folder."""
     object_name = f"{record_key}/current"
     return f"{prefix}/{object_name}" if prefix else object_name
 
@@ -207,6 +216,18 @@ def _stat_object_or_none(client: Minio, bucket: str, object_name: str):
         if exc.code not in {"NoSuchKey", "NoSuchObject"}:
             raise
         return None
+
+
+def _remove_object_if_present(
+    client: Minio,
+    bucket: str,
+    object_name: str,
+) -> bool:
+    """Remove an object if present and report whether it was found."""
+    if _stat_object_or_none(client, bucket, object_name) is None:
+        return False
+    client.remove_object(bucket, object_name)
+    return True
 
 
 def _metadata_blob_hash(stat_result) -> str | None:
@@ -228,8 +249,10 @@ class MinioPipeline:
     included in the MinIO key: a hash-based key would create another object
     for every replacement instead of overwriting the older object, retaining
     historical blobs that this latest-state storage requirement does not need.
-    Retrying a transient upload is safe because every attempt targets that same
-    stable object key with the same bytes.
+    Objects are stored flat as ``{record_key}.pdf`` or ``{record_key}.html``;
+    the superseded ``{record_key}/current`` object is removed only after its
+    flat replacement is safely stored. Retrying a transient upload is safe
+    because every attempt targets the same stable filename with the same bytes.
     """
 
     def __init__(
@@ -346,17 +369,26 @@ class MinioPipeline:
             raise DropItem("Original document bytes are missing")
 
         source_format = document.get("source_format")
-        content_type = (
-            "application/pdf"
-            if source_format == "pdf"
-            else "text/html; charset=utf-8"
-        )
+        if source_format not in {"html", "pdf"}:
+            spider.crawler.stats.inc_value("errors/minio_payload")
+            spider.logger.error(
+                "Unsupported source format: record_key=%s format=%r",
+                record_key,
+                source_format,
+            )
+            raise DropItem("Source format must be either html or pdf")
+
+        content_type = {
+            "pdf": "application/pdf",
+            "html": "text/html; charset=utf-8",
+        }[source_format]
         object_name = "<unresolved>"
         try:
             blob_hash = hash_document(raw_content)
             object_name = _build_blob_object_name(
                 record_key,
                 self.prefix,
+                source_format,
             )
 
             if self.client is None:
@@ -381,7 +413,7 @@ class MinioPipeline:
             )
             if _metadata_blob_hash(existing) == blob_hash:
                 etag = existing.etag
-                spider.crawler.stats.inc_value("persistence/minio_unchanged")
+                persistence_outcome = "unchanged"
             else:
                 result = _run_storage_operation(
                     lambda: self.client.put_object(
@@ -399,11 +431,33 @@ class MinioPipeline:
                     max_delay=self.retry_max_delay,
                 )
                 etag = result.etag
-                spider.crawler.stats.inc_value(
-                    "persistence/minio_overwritten"
-                    if existing is not None
-                    else "persistence/minio_inserted"
+                persistence_outcome = (
+                    "overwritten" if existing is not None else "inserted"
                 )
+
+            legacy_object_name = _build_legacy_blob_object_name(
+                record_key,
+                self.prefix,
+            )
+            legacy_removed = _run_storage_operation(
+                lambda: _remove_object_if_present(
+                    self.client,
+                    self.bucket,
+                    legacy_object_name,
+                ),
+                spider=spider,
+                operation_name="minio_legacy_cleanup",
+                retry_times=self.retry_times,
+                base_delay=self.retry_base_delay,
+                max_delay=self.retry_max_delay,
+            )
+            if legacy_removed:
+                spider.crawler.stats.inc_value(
+                    "persistence/minio_legacy_removed"
+                )
+            spider.crawler.stats.inc_value(
+                f"persistence/minio_{persistence_outcome}"
+            )
 
         except Exception as exc:
             spider.crawler.stats.inc_value("errors/minio_write")

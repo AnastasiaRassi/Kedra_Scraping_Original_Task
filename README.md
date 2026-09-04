@@ -402,8 +402,9 @@ MongoDB has a unique index on `record_key`.
 MinIO object names are deterministic:
 
 ```text
-# Stable current object: overwritten when the source bytes or format change
-documents/{record_key}/current
+# Flat files: overwritten when the source bytes change
+documents/{record_key}.pdf
+documents/{record_key}.html
 ```
 
 Reruns are safe:
@@ -413,6 +414,9 @@ Reruns are safe:
   replacement as the same logical document.
 - When that object's stored SHA-256 differs from the newly downloaded bytes,
   MinIO writes to the same object key and replaces the older bytes.
+- The old `documents/{record_key}/current` layout is deleted after the flat
+  replacement is stored successfully, so its virtual MinIO folder disappears
+  when that document is crawled again.
 - The content SHA-256 is metadata for change detection, not part of the object
   name; using it in the name would retain a separate historical object.
 - MongoDB upserts rather than inserting a duplicate.

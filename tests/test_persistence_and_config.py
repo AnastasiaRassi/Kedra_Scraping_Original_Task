@@ -82,6 +82,7 @@ class _ExistingMinioClient:
     def __init__(self, blob_hash: str) -> None:
         self.blob_hash = blob_hash
         self.object_names: list[str] = []
+        self.removed: list[str] = []
 
     def stat_object(self, bucket: str, object_name: str):
         self.object_names.append(object_name)
@@ -93,10 +94,14 @@ class _ExistingMinioClient:
     def put_object(self, **kwargs):
         raise AssertionError("Unchanged objects must not be uploaded")
 
+    def remove_object(self, bucket: str, object_name: str) -> None:
+        self.removed.append(object_name)
+
 
 class _ChangedCurrentMinioClient:
     def __init__(self) -> None:
         self.uploaded: list[str] = []
+        self.removed: list[str] = []
 
     def stat_object(self, bucket: str, object_name: str):
         return SimpleNamespace(
@@ -107,6 +112,9 @@ class _ChangedCurrentMinioClient:
     def put_object(self, **kwargs):
         self.uploaded.append(kwargs["object_name"])
         return SimpleNamespace(etag="updated-etag")
+
+    def remove_object(self, bucket: str, object_name: str) -> None:
+        self.removed.append(object_name)
 
 
 class _RetryingMinioClient(_ChangedCurrentMinioClient):
@@ -171,10 +179,10 @@ class _RetryingMongoCollection(_MongoCollection):
     f"persistence dependencies are unavailable: {PIPELINE_IMPORT_ERROR}",
 )
 class PersistenceUpsertTests(unittest.TestCase):
-    def test_object_name_depends_on_stable_record_key(self) -> None:
+    def test_object_name_is_a_flat_file_with_its_format(self) -> None:
         self.assertEqual(
-            _build_blob_object_name("record", "documents"),
-            "documents/record/current",
+            _build_blob_object_name("record", "documents", "pdf"),
+            "documents/record.pdf",
         )
 
     def test_unchanged_blob_is_reused(self) -> None:
@@ -203,8 +211,10 @@ class PersistenceUpsertTests(unittest.TestCase):
             _Spider(),
         )
 
-        object_name = f"documents/{document['record_key']}/current"
-        self.assertEqual(client.object_names, [object_name])
+        object_name = f"documents/{document['record_key']}.pdf"
+        legacy_name = f"documents/{document['record_key']}/current"
+        self.assertEqual(client.object_names, [object_name, legacy_name])
+        self.assertEqual(client.removed, [legacy_name])
         self.assertEqual(document["blob"]["object_key"], object_name)
         self.assertNotIn("version_object_key", document["blob"])
         self.assertEqual(document["blob"]["sha256"], blob_hash)
@@ -237,6 +247,10 @@ class PersistenceUpsertTests(unittest.TestCase):
 
         self.assertEqual(
             client.uploaded,
+            [f"documents/{document['record_key']}.pdf"],
+        )
+        self.assertEqual(
+            client.removed,
             [f"documents/{document['record_key']}/current"],
         )
 
@@ -282,7 +296,7 @@ class PersistenceUpsertTests(unittest.TestCase):
     def test_mongodb_removes_legacy_blob_history(self) -> None:
         blob = {
             "bucket": "raw-documents",
-            "object_key": "documents/record/current",
+            "object_key": "documents/record.html",
             "etag": "storage-specific-etag",
             "content_type": "text/html; charset=utf-8",
             "size_bytes": 42,
@@ -313,7 +327,7 @@ class PersistenceUpsertTests(unittest.TestCase):
     def test_transient_mongodb_upsert_is_retried_and_reported(self) -> None:
         blob = {
             "bucket": "raw-documents",
-            "object_key": "documents/record/current",
+            "object_key": "documents/record.html",
             "sha256": "hash",
         }
         collection = _RetryingMongoCollection(existing=None)
@@ -400,12 +414,12 @@ class PersistenceUpsertTests(unittest.TestCase):
             client,
             {
                 "bucket": "raw-documents",
-                "object_key": "documents/record/current",
+                "object_key": "documents/record.pdf",
             },
         )
 
         self.assertEqual(content, b"current bytes")
-        self.assertEqual(client.object_key, "documents/record/current")
+        self.assertEqual(client.object_key, "documents/record.pdf")
 
 
 class SiteConfigTests(unittest.TestCase):

@@ -625,12 +625,20 @@ class WRC_IE_Spider(scrapy.Spider):
                 "documents/pdf_ingested",
                 0,
             ),
-            "minio_uploaded": stats.get_value(
-                "persistence/minio_uploaded",
+            "minio_inserted": stats.get_value(
+                "persistence/minio_inserted",
+                0,
+            ),
+            "minio_overwritten": stats.get_value(
+                "persistence/minio_overwritten",
                 0,
             ),
             "minio_unchanged": stats.get_value(
                 "persistence/minio_unchanged",
+                0,
+            ),
+            "minio_legacy_removed": stats.get_value(
+                "persistence/minio_legacy_removed",
                 0,
             ),
             "mongodb_inserted": stats.get_value(
