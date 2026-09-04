@@ -128,13 +128,28 @@ All supported variables and development defaults are listed in
       "spider": "WRC_IE",
       "source": "https://www.workplacerelations.ie",
       "spider_settings": {
-        "WRC_CONFIG_PATH": "config/wrc.json"
+        "WRC_CONFIG_PATH": "config/wrc.json",
+        "CONCURRENT_REQUESTS_PER_DOMAIN": "6",
+        "DOWNLOAD_DELAY": "0.1",
+        "AUTOTHROTTLE_ENABLED": "true",
+        "AUTOTHROTTLE_TARGET_CONCURRENCY": "3.0"
       },
       "site_config_setting": "WRC_CONFIG_PATH"
     }
   }
 }
 ```
+
+The `spider_settings` values override the conservative global request-rate
+defaults for that source. Direct Scrapy crawls, profiler runs using `--source`,
+and Dagster ingestion all load the same overrides. Explicit command-line
+`-s NAME=VALUE` settings have the highest priority and are intended for
+experiments.
+
+Global rate settings must remain conservative because a benchmark against one
+website says nothing about another website's capacity or blocking policy. Add
+rate overrides for a new source only after benchmarking that source on a
+representative complete partition.
 
 To add another website, implement a source spider that accepts
 `start_date`/`end_date`, yields the shared raw item in ingestion mode, and
@@ -146,7 +161,9 @@ The Dagster assets do not need website-specific branches.
 Direct crawls default to `SCRAPE_MODE=full`: the spider downloads each file,
 extracts its text, and yields a complete `KedraScraperItem` in one run.
 
-The WRC spider accepts `DD-MM-YYYY` or `YYYY-MM-DD` dates:
+The WRC spider accepts `DD-MM-YYYY` or `YYYY-MM-DD` dates. It
+automatically loads the `wrc_ie` request-rate overrides from the source
+registry; command-line `-s` values can still override them:
 
 ```powershell
 scrapy crawl WRC_IE `
@@ -185,15 +202,23 @@ Run a bounded profile through the source registry:
 python -m benchmarks.crawl_profiler `
   --source wrc_ie `
   -a start_date=01-01-2008 `
-  -a end_date=31-01-2008 `
-  --max-items 100 `
-  -s CONCURRENT_REQUESTS_PER_DOMAIN=4 `
-  -s AUTOTHROTTLE_TARGET_CONCURRENCY=2
+  -a end_date=31-01-2008
 ```
 
-Use `--spider WRC_IE` instead of `--source wrc_ie` to address a spider
+Using `--source wrc_ie` applies the WRC settings registered in
+`config/sources.json`. Use `--spider WRC_IE` to address the spider
 directly. Repeat `-a NAME=VALUE` for spider arguments and `-s NAME=VALUE`
-for settings being evaluated.
+for temporary settings being evaluated; explicit `-s` values override both
+the source profile and global defaults.
+
+The current WRC profile was selected from a complete January 2008 partition.
+With per-domain concurrency 6, a 0.1-second minimum delay, and AutoThrottle
+target concurrency 3, the observed run scraped 150 of 151 discovered records
+in 57.8 seconds (approximately 155.7 documents/minute), with zero request
+failures, retries, blocked responses, or unexplained missing records. The one
+extraction failure was a known empty duplicate landing page. These results
+justify the WRC override only; they are not global defaults and should be
+revalidated periodically and under representative conditions.
 
 Each report under `reports/crawl_profiles/` records:
 
