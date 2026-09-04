@@ -120,9 +120,11 @@ MINIO_SECURE = env_bool("MINIO_SECURE", False)
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "kedra-documents")
 MINIO_PREFIX = os.getenv("MINIO_PREFIX", "documents")
 
-# The profiler is dormant unless CRAWL_PROFILE_PATH is supplied.
+# Structured JSON logging is always enabled. The profiler remains dormant
+# unless CRAWL_PROFILE_PATH is supplied.
 EXTENSIONS = {
-    "kedra_scraper.extensions.CrawlProfilerExtension": 500,
+    "kedra_scraper.structured_logging.StructuredLoggingExtension": 100,
+    "benchmarks.extensions.CrawlProfilerExtension": 500,
 }
 
 # Optional middleware components remain disabled until needed.
