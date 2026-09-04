@@ -106,6 +106,7 @@ configuration. No local credentials belong in source code.
 | Direct crawl period | `SCRAPE_START_DATE`, `SCRAPE_END_DATE`, `SCRAPE_PARTITION_MONTHS` |
 | Source rules | `WRC_CONFIG_PATH`, `SOURCE_REGISTRY_PATH` |
 | Request behavior | `SCRAPY_ROBOTSTXT_OBEY`, `SCRAPY_COOKIES_ENABLED`, `SCRAPY_DOWNLOAD_TIMEOUT`, `SCRAPY_RETRY_TIMES` |
+| Structured logs | `SCRAPY_LOG_DIR`, `SCRAPY_STRUCTURED_LOG_PATH`, `SCRAPY_LOG_MAX_BYTES`, `SCRAPY_LOG_BACKUP_COUNT` |
 | Concurrency | `SCRAPY_CONCURRENT_REQUESTS`, `SCRAPY_CONCURRENT_REQUESTS_PER_DOMAIN`, `SCRAPY_DOWNLOAD_DELAY` |
 | AutoThrottle | `SCRAPY_AUTOTHROTTLE_ENABLED`, `SCRAPY_AUTOTHROTTLE_START_DELAY`, `SCRAPY_AUTOTHROTTLE_MAX_DELAY`, `SCRAPY_AUTOTHROTTLE_TARGET_CONCURRENCY` |
 | Dagster partitions | `DAGSTER_PARTITION_START_DATE`, `DAGSTER_PARTITION_END_DATE`, `DAGSTER_PARTITION_TIMEZONE`, `DAGSTER_PARTITION_END_OFFSET` |
@@ -174,6 +175,8 @@ scrapy crawl WRC_IE `
 ```
 
 `-O` overwrites the output file. Use `-o` only when intentionally appending.
+Every direct crawl also retains its complete structured log at
+`logs/<spider>/<UTC timestamp>_<process id>.jsonl`.
 
 For a bounded test:
 
@@ -219,6 +222,10 @@ failures, retries, blocked responses, or unexplained missing records. The one
 extraction failure was a known empty duplicate landing page. These results
 justify the WRC override only; they are not global defaults and should be
 revalidated periodically and under representative conditions.
+
+The matching structured event stream is retained under
+`logs/profiles/<profile name>.jsonl` and its path is printed when the run
+starts.
 
 Each report under `reports/crawl_profiles/` records:
 
@@ -422,13 +429,25 @@ the rest of the partition continues. Set
 documents have been attempted.
 
 Subprocess output is captured so legal-document text does not flood the
-Dagster logs. On failure, only the configured tail is emitted.
+Dagster UI. The complete Scrapy event stream is retained at
+`logs/dagster/<source>/<partition>/raw_documents_<run id>.jsonl`, and that
+path appears in the Dagster asset metadata. On failure, only the configured
+subprocess tail is also copied into Dagster's own event log.
 
 ## Structured logging and reconciliation
 
-Scrapy log records are emitted as one JSON object per line. Crawl-specific
-events include queryable fields such as `partition_date`, `body`,
-`identifier`, `url`, `status_code`, `error_type`, and `reason`.
+Scrapy log records are emitted and retained as one JSON object per line.
+Crawl-specific events include queryable fields such as `partition_date`,
+`body`, `identifier`, `url`, `status_code`, `error_type`, and
+`reason`.
+
+The standard Python logging system is used because Scrapy and Dagster already
+integrate with it directly. A rotating file handler caps each active file at
+`SCRAPY_LOG_MAX_BYTES` (25 MB by default) and retains
+`SCRAPY_LOG_BACKUP_COUNT` rotated files (5 by default). Set
+`SCRAPY_LOG_DIR` to relocate all generated logs, or
+`SCRAPY_STRUCTURED_LOG_PATH` to force a path for a standalone crawl.
+Runtime files below `logs/` are ignored by Git.
 
 Every body/month pair tracks:
 
