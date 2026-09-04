@@ -233,7 +233,7 @@ Each report under `reports/crawl_profiles/` records:
 - Every spider argument, including `start_date` and `end_date`.
 - The final effective concurrency, throttling, timeout and retry settings.
 - The Git commit, branch, dirty-state flag, and tracked-diff fingerprint.
-- Python, platform, CPU, and relevant installed dependency versions.
+- Python, platform, CPU, direct dependency versions, and a complete installed-distribution snapshot with its own digest.
 - SHA-256 fingerprints for the source registry, site configuration, and
   `requirements.txt`.
 - Duration, scraped documents per minute and response-byte volume.
