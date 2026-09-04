@@ -6,10 +6,7 @@
       "spider_settings": {
         "WRC_CONFIG_PATH": "config/wrc.json"
       },
-      "html_content_selectors": [
-        "h1.page-title + div.content",
-        "div.col-sm-9 > div.content"
-      ]
+      "site_config_setting": "WRC_CONFIG_PATH"
     }
   }
 }

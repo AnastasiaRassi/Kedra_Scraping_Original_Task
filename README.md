@@ -43,9 +43,9 @@ This is ingestion followed by scraping. The second asset is deliberately
 named `scraped_documents`; its responsibility is document text extraction.
 
 The Dagster definitions are source-agnostic. `config/sources.json` maps a
-source key to its spider, spider settings, canonical source URL, and HTML
-content selectors. The source-specific crawling rules remain with each spider
-and its configuration file.
+source key to its spider, spider settings, canonical source URL, and the
+setting that points to that site's configuration file. HTML selectors and
+other website-specific rules live only in the site's own configuration file.
 
 ## Installation
 
@@ -130,10 +130,7 @@ All supported variables and development defaults are listed in
       "spider_settings": {
         "WRC_CONFIG_PATH": "config/wrc.json"
       },
-      "html_content_selectors": [
-        "h1.page-title + div.content",
-        "div.col-sm-9 > div.content"
-      ]
+      "site_config_setting": "WRC_CONFIG_PATH"
     }
   }
 }
@@ -337,14 +334,18 @@ MongoDB has a unique index on `record_key`.
 MinIO object names are deterministic:
 
 ```text
-documents/{record_key}.html
-documents/{record_key}.pdf
+documents/{record_key}/{blob_sha256}.html
+documents/{record_key}/{blob_sha256}.pdf
 ```
 
 Reruns are safe:
 
 - Unchanged MinIO bytes are not uploaded again.
+- Changed raw bytes create a new content-addressed object; older objects are
+  never overwritten.
 - MongoDB upserts rather than inserting a duplicate.
+- MongoDB's current `blob` field points to the newest observed version, while
+  `blob_history` retains one stable reference for every distinct raw version.
 - Raw records become `pending` only when new or when their blob changes.
 - `scraped_documents` skips a completed record when its scraped blob hash still
   matches the current raw blob.

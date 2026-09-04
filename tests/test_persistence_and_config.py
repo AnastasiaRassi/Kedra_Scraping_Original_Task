@@ -1,0 +1,246 @@
+from __future__ import annotations
+
+import json
+import tempfile
+import unittest
+from hashlib import sha256
+from pathlib import Path
+from types import SimpleNamespace
+
+from kedra_scraper.config import load_source_registry
+
+try:
+    from kedra_scraper.pipelines import (
+        MinioPipeline,
+        MongoPipeline,
+        _build_blob_history_entry,
+        _build_blob_object_name,
+    )
+except ModuleNotFoundError as exc:
+    persistence_dependencies = {
+        "itemadapter",
+        "minio",
+        "pymongo",
+        "scrapy",
+        "twisted",
+    }
+    if exc.name not in persistence_dependencies:
+        raise
+    PIPELINE_IMPORT_ERROR = str(exc)
+else:
+    PIPELINE_IMPORT_ERROR = None
+
+
+class _Stats:
+    def __init__(self) -> None:
+        self.values: dict[str, int] = {}
+
+    def inc_value(self, key: str) -> None:
+        self.values[key] = self.values.get(key, 0) + 1
+
+
+class _Logger:
+    def error(self, *args, **kwargs) -> None:
+        pass
+
+    def exception(self, *args, **kwargs) -> None:
+        pass
+
+
+class _Spider:
+    def __init__(self) -> None:
+        self.crawler = SimpleNamespace(stats=_Stats())
+        self.logger = _Logger()
+
+
+class _ExistingMinioClient:
+    def __init__(self, blob_hash: str) -> None:
+        self.blob_hash = blob_hash
+        self.object_name: str | None = None
+
+    def stat_object(self, bucket: str, object_name: str):
+        self.object_name = object_name
+        return SimpleNamespace(
+            metadata={"x-amz-meta-blob-hash": self.blob_hash},
+            etag="existing-etag",
+        )
+
+    def put_object(self, **kwargs):
+        raise AssertionError("An existing content version must not be uploaded")
+
+
+class _MongoCollection:
+    def __init__(self, existing: dict | None = None) -> None:
+        self.existing = existing
+        self.update: dict | None = None
+
+    def find_one(self, *args, **kwargs):
+        return self.existing
+
+    def update_one(self, query: dict, update: dict, upsert: bool):
+        self.update = update
+        return SimpleNamespace(upserted_id="inserted")
+
+
+@unittest.skipIf(
+    PIPELINE_IMPORT_ERROR is not None,
+    f"persistence dependencies are unavailable: {PIPELINE_IMPORT_ERROR}",
+)
+class PersistenceHistoryTests(unittest.TestCase):
+    def test_object_name_is_content_addressed(self) -> None:
+        first = _build_blob_object_name("record", "aaa", "pdf", "documents")
+        second = _build_blob_object_name("record", "bbb", "pdf", "documents")
+
+        self.assertEqual(first, "documents/record/aaa.pdf")
+        self.assertEqual(second, "documents/record/bbb.pdf")
+        self.assertNotEqual(first, second)
+
+    def test_existing_blob_version_is_reused(self) -> None:
+        raw_content = b"unchanged source bytes"
+        blob_hash = sha256(raw_content).hexdigest()
+        client = _ExistingMinioClient(blob_hash)
+        pipeline = MinioPipeline(
+            enabled=True,
+            endpoint="unused",
+            access_key="unused",
+            secret_key="unused",
+            secure=False,
+            bucket="raw-documents",
+            prefix="documents",
+        )
+        pipeline.client = client
+
+        document = pipeline.process_item(
+            {
+                "source": "https://example.test",
+                "landing_url": "https://example.test/document/1",
+                "doc_url": "https://example.test/document/1.pdf",
+                "source_format": "pdf",
+                "raw_content": raw_content,
+            },
+            _Spider(),
+        )
+
+        self.assertEqual(
+            client.object_name,
+            f"documents/{document['record_key']}/{blob_hash}.pdf",
+        )
+        self.assertEqual(document["blob"]["sha256"], blob_hash)
+
+    def test_mongodb_adds_stable_blob_history_entry(self) -> None:
+        blob = {
+            "bucket": "raw-documents",
+            "object_key": "documents/record/hash.html",
+            "etag": "storage-specific-etag",
+            "content_type": "text/html; charset=utf-8",
+            "size_bytes": 42,
+            "sha256": "hash",
+        }
+        collection = _MongoCollection()
+        pipeline = MongoPipeline(
+            enabled=True,
+            uri="unused",
+            database="unused",
+            collection="unused",
+            timeout_ms=1,
+        )
+        pipeline.collection = collection
+
+        pipeline.process_item(
+            {"record_key": "record", "blob": blob},
+            _Spider(),
+        )
+
+        self.assertIsNotNone(collection.update)
+        history = collection.update["$addToSet"]["blob_history"]["$each"]
+        self.assertEqual(history, [_build_blob_history_entry(blob)])
+        self.assertNotIn("etag", history[0])
+        self.assertEqual(collection.update["$set"]["blob"], blob)
+
+    def test_mongodb_seeds_history_with_the_previous_blob(self) -> None:
+        previous_blob = {
+            "bucket": "raw-documents",
+            "object_key": "documents/record.html",
+            "etag": "legacy-etag",
+            "content_type": "text/html; charset=utf-8",
+            "size_bytes": 10,
+            "sha256": "old-hash",
+        }
+        current_blob = {
+            "bucket": "raw-documents",
+            "object_key": "documents/record/new-hash.html",
+            "etag": "new-etag",
+            "content_type": "text/html; charset=utf-8",
+            "size_bytes": 12,
+            "sha256": "new-hash",
+        }
+        collection = _MongoCollection(existing={"blob": previous_blob})
+        pipeline = MongoPipeline(
+            enabled=True,
+            uri="unused",
+            database="unused",
+            collection="unused",
+            timeout_ms=1,
+        )
+        pipeline.collection = collection
+
+        pipeline.process_item(
+            {"record_key": "record", "blob": current_blob},
+            _Spider(),
+        )
+
+        history = collection.update["$addToSet"]["blob_history"]["$each"]
+        self.assertEqual(
+            history,
+            [
+                _build_blob_history_entry(previous_blob),
+                _build_blob_history_entry(current_blob),
+            ],
+        )
+
+
+class SiteConfigTests(unittest.TestCase):
+    def test_registry_loads_html_selectors_from_site_config(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            site_config_path = root / "site.json"
+            site_config_path.write_text(
+                json.dumps(
+                    {
+                        "selectors": {
+                            "html_content": ["main article", "div.document"]
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            registry_path = root / "sources.json"
+            registry_path.write_text(
+                json.dumps(
+                    {
+                        "sources": {
+                            "example": {
+                                "spider": "example_spider",
+                                "source": "https://example.test",
+                                "spider_settings": {
+                                    "EXAMPLE_CONFIG_PATH": str(site_config_path)
+                                },
+                                "site_config_setting": "EXAMPLE_CONFIG_PATH",
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            source = load_source_registry(str(registry_path))["example"]
+
+        self.assertEqual(source.site_config_path, str(site_config_path))
+        self.assertEqual(
+            source.html_content_selectors,
+            ("main article", "div.document"),
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

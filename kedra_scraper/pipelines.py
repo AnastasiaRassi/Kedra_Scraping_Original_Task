@@ -26,6 +26,31 @@ def _build_record_key(document: dict) -> str:
     return hash_document(identity)
 
 
+def _build_blob_object_name(
+    record_key: str,
+    blob_hash: str,
+    extension: str,
+    prefix: str,
+) -> str:
+    """Build an immutable, content-addressed MinIO object name."""
+    object_name = f"{record_key}/{blob_hash}.{extension}"
+    return f"{prefix}/{object_name}" if prefix else object_name
+
+
+def _build_blob_history_entry(blob: dict) -> dict:
+    """Return stable blob fields suitable for MongoDB's $addToSet."""
+    return {
+        key: blob[key]
+        for key in (
+            "bucket",
+            "object_key",
+            "content_type",
+            "size_bytes",
+            "sha256",
+        )
+    }
+
+
 class MinioPipeline:
     """Persist original bytes before MongoDB stores their metadata."""
 
@@ -136,12 +161,15 @@ class MinioPipeline:
             if source_format == "pdf"
             else "text/html; charset=utf-8"
         )
-        object_name = f"{record_key}.{extension}" # like its name.pdf or .html
-        if self.prefix: 
-            object_name = f"{self.prefix}/{object_name}" #dir of documents/object's name 
-
+        object_name = "<unresolved>"
         try:
             blob_hash = hash_document(raw_content)
+            object_name = _build_blob_object_name(
+                record_key,
+                blob_hash,
+                extension,
+                self.prefix,
+            )
 
             if self.client is None:
                 raise RuntimeError("MinIO client was not initialised")
@@ -162,7 +190,12 @@ class MinioPipeline:
                     or existing.metadata.get("blob-hash")
                 )
 
-            if existing is not None and existing_hash == blob_hash:
+            if existing is not None and existing_hash != blob_hash:
+                raise RuntimeError(
+                    "Content-addressed MinIO object has unexpected blob hash"
+                )
+
+            if existing is not None:
                 etag = existing.etag
                 spider.crawler.stats.inc_value("persistence/minio_unchanged")
                 # inc value increases cnt of the stat key by 1, so we can see how many times we have uploaded unchanged files
@@ -321,15 +354,31 @@ class MongoPipeline:
         now = datetime.now(timezone.utc)
 
         try:
+            blob_history_entry = _build_blob_history_entry(blob)
             existing = self.collection.find_one(
                 {"record_key": record_key},
                 {
                     "content_hash": 1,
-                    "blob.sha256": 1,
+                    "blob": 1,
                     "scraping_status": 1,
                 },
             )
             existing_blob = (existing or {}).get("blob") or {}
+            blob_history_entries = [blob_history_entry]
+            if all(
+                key in existing_blob
+                for key in (
+                    "bucket",
+                    "object_key",
+                    "content_type",
+                    "size_bytes",
+                    "sha256",
+                )
+            ):
+                blob_history_entries.insert(
+                    0,
+                    _build_blob_history_entry(existing_blob),
+                )
 
             blob_changed = (
                 existing is None
@@ -343,6 +392,9 @@ class MongoPipeline:
             update: dict = {
                 "$set": document,
                 "$setOnInsert": {"created_at": now},
+                "$addToSet": {
+                    "blob_history": {"$each": blob_history_entries}
+                },
             }
 
             if has_extracted_content :

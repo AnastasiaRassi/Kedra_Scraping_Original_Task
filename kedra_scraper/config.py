@@ -17,6 +17,7 @@ class SourceRegistryEntry: # schema of characteristics of a source's spider, rep
     spider: str
     source: str
     spider_settings: dict[str, str]
+    site_config_path: str
     html_content_selectors: tuple[str, ...]
 
 
@@ -54,18 +55,49 @@ def load_source_registry(value: str) -> dict[str, SourceRegistryEntry]:
             )
             for name, setting in settings_raw.items()
         }
+        site_config_setting = text(
+            source,
+            "site_config_setting",
+            context,
+        )
+        try:
+            site_config_path = spider_settings[site_config_setting]
+        except KeyError as exc:
+            raise ValueError(
+                f"{context}.site_config_setting must name a key in "
+                f"{context}.spider_settings"
+            ) from exc
+
         registry[source_key] = SourceRegistryEntry(
             key=source_key,
             spider=text(source, "spider", context),
             source=text(source, "source", context),
             spider_settings=spider_settings,
-            html_content_selectors=string_tuple(
-                source.get("html_content_selectors"),
-                f"{context}.html_content_selectors",
+            site_config_path=site_config_path,
+            html_content_selectors=load_html_content_selectors(
+                site_config_path
             ),
         )
 
     return registry
+
+
+def load_html_content_selectors(value: str) -> tuple[str, ...]:
+    """Load generic extraction selectors from a site's own config file."""
+    path = resolve_project_path(value)
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise ValueError(f"Site config does not exist: {path}") from exc
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Cannot read site config {path}: {exc}") from exc
+
+    root = mapping(raw, "site config root")
+    selectors = mapping(root.get("selectors"), "site config selectors")
+    return string_tuple(
+        selectors.get("html_content"),
+        "site config selectors.html_content",
+    )
 
 
 def resolve_project_path(value: str) -> Path:
