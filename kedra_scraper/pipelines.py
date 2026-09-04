@@ -296,6 +296,8 @@ class MongoPipeline:
             raise
 
     def process_item(self, item, spider):
+        """Idempotently persist document metadata and scraping state in MongoDB."""
+
         document = ItemAdapter(item).asdict()
 
         if not self.enabled:
@@ -328,10 +330,12 @@ class MongoPipeline:
                 },
             )
             existing_blob = (existing or {}).get("blob") or {}
+
             blob_changed = (
                 existing is None
                 or existing_blob.get("sha256") != blob.get("sha256")
-            )
+            ) #checks for   old blob SHA-256 != new blob SHA-256
+
             has_extracted_content  = bool(document.get("content_hash"))
 
             document["last_seen_at"] = now
@@ -344,9 +348,10 @@ class MongoPipeline:
             if has_extracted_content :
                 content_changed = (
                     existing is None
-                    or existing.get("content_hash") != document["content_hash"]
+                    or existing.get("content_hash") != document["content_hash"] # diff content unlike blob changed (html metadata for ex not the text itself changed)
                     or blob_changed
                 )
+
                 document["scraping_status"] = "completed"
                 document["scraped_blob_sha256"] = blob.get("sha256")
                 document["scraped_at"] = now
@@ -356,6 +361,7 @@ class MongoPipeline:
             else:
                 content_changed = blob_changed
                 current_status = (existing or {}).get("scraping_status")
+
                 if blob_changed or current_status not in {
                     "completed",
                     "failed",
