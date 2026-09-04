@@ -28,35 +28,11 @@ def _build_record_key(document: dict) -> str:
 
 def _build_blob_object_name(
     record_key: str,
-    blob_hash: str,
-    extension: str,
     prefix: str,
 ) -> str:
-    """Build an immutable, content-addressed MinIO object name."""
-    object_name = f"{record_key}/{blob_hash}.{extension}"
-    return f"{prefix}/{object_name}" if prefix else object_name
-
-
-def _build_current_blob_object_name(
-    record_key: str,
-    prefix: str,
-) -> str:
-    """Build the stable MinIO object name used for the latest version."""
+    """Build the stable MinIO key for one logical source document."""
     object_name = f"{record_key}/current"
     return f"{prefix}/{object_name}" if prefix else object_name
-
-
-def _build_blob_history_entry(blob: dict) -> dict:
-    """Return an immutable blob reference for MongoDB's $addToSet."""
-    return {
-        "bucket": blob["bucket"],
-        "object_key": (
-            blob.get("version_object_key") or blob["object_key"]
-        ),
-        "content_type": blob["content_type"],
-        "size_bytes": blob["size_bytes"],
-        "sha256": blob["sha256"],
-    }
 
 
 def _stat_object_or_none(client: Minio, bucket: str, object_name: str):
@@ -79,7 +55,15 @@ def _metadata_blob_hash(stat_result) -> str | None:
 
 
 class MinioPipeline:
-    """Persist original bytes before MongoDB stores their metadata."""
+    """Upsert one current raw object per logical source document.
+
+    ``record_key`` identifies the document from its source and landing URL, so
+    it remains stable when that document's bytes change. The content SHA-256 is
+    used only to detect whether those bytes changed. It is deliberately not
+    included in the MinIO key: a hash-based key would create another object
+    for every replacement instead of overwriting the older object, retaining
+    historical blobs that this latest-state storage requirement does not need.
+    """
 
     def __init__(
         self,
@@ -182,23 +166,15 @@ class MinioPipeline:
             raise DropItem("Original document bytes are missing")
 
         source_format = document.get("source_format")
-        extension = "pdf" if source_format == "pdf" else "html"
         content_type = (
             "application/pdf"
             if source_format == "pdf"
             else "text/html; charset=utf-8"
         )
-        version_object_name = "<unresolved>"
-        current_object_name = "<unresolved>"
+        object_name = "<unresolved>"
         try:
             blob_hash = hash_document(raw_content)
-            version_object_name = _build_blob_object_name(
-                record_key,
-                blob_hash,
-                extension,
-                self.prefix,
-            )
-            current_object_name = _build_current_blob_object_name(
+            object_name = _build_blob_object_name(
                 record_key,
                 self.prefix,
             )
@@ -211,72 +187,43 @@ class MinioPipeline:
             if content_hash:
                 metadata["content-hash"] = content_hash
 
-            existing_version = _stat_object_or_none(
+            existing = _stat_object_or_none(
                 self.client,
                 self.bucket,
-                version_object_name,
+                object_name,
             )
-            if (
-                existing_version is not None
-                and _metadata_blob_hash(existing_version) != blob_hash
-            ):
-                raise RuntimeError(
-                    "Content-addressed MinIO object has unexpected blob hash"
-                )
-
-            if existing_version is not None:
+            if _metadata_blob_hash(existing) == blob_hash:
+                etag = existing.etag
                 spider.crawler.stats.inc_value("persistence/minio_unchanged")
-            else:
-                self.client.put_object(
-                    bucket_name=self.bucket,
-                    object_name=version_object_name,
-                    data=BytesIO(raw_content),
-                    length=len(raw_content),
-                    content_type=content_type,
-                    metadata=metadata,
-                )
-                spider.crawler.stats.inc_value("persistence/minio_uploaded")
-
-            existing_current = _stat_object_or_none(
-                self.client,
-                self.bucket,
-                current_object_name,
-            )
-            if _metadata_blob_hash(existing_current) == blob_hash:
-                current_etag = existing_current.etag
-                spider.crawler.stats.inc_value(
-                    "persistence/minio_current_unchanged"
-                )
             else:
                 result = self.client.put_object(
                     bucket_name=self.bucket,
-                    object_name=current_object_name,
+                    object_name=object_name,
                     data=BytesIO(raw_content),
                     length=len(raw_content),
                     content_type=content_type,
                     metadata=metadata,
                 )
-                current_etag = result.etag
+                etag = result.etag
                 spider.crawler.stats.inc_value(
-                    "persistence/minio_current_upserted"
+                    "persistence/minio_overwritten"
+                    if existing is not None
+                    else "persistence/minio_inserted"
                 )
 
         except Exception as exc:
             spider.crawler.stats.inc_value("errors/minio_write")
             spider.logger.exception(
-                "MinIO persistence failed: record_key=%s "
-                "version_object=%s current_object=%s",
+                "MinIO persistence failed: record_key=%s object=%s",
                 record_key,
-                version_object_name,
-                current_object_name,
+                object_name,
             )
             raise DropItem("MinIO persistence failed") from exc
 
         document["blob"] = {
             "bucket": self.bucket,
-            "object_key": current_object_name,
-            "version_object_key": version_object_name,
-            "etag": current_etag,
+            "object_key": object_name,
+            "etag": etag,
             "content_type": content_type,
             "size_bytes": len(raw_content),
             "sha256": blob_hash,
@@ -402,7 +349,6 @@ class MongoPipeline:
         now = datetime.now(timezone.utc)
 
         try:
-            blob_history_entry = _build_blob_history_entry(blob)
             existing = self.collection.find_one(
                 {"record_key": record_key},
                 {
@@ -412,21 +358,6 @@ class MongoPipeline:
                 },
             )
             existing_blob = (existing or {}).get("blob") or {}
-            blob_history_entries = [blob_history_entry]
-            if all(
-                key in existing_blob
-                for key in (
-                    "bucket",
-                    "object_key",
-                    "content_type",
-                    "size_bytes",
-                    "sha256",
-                )
-            ):
-                blob_history_entries.insert(
-                    0,
-                    _build_blob_history_entry(existing_blob),
-                )
 
             blob_changed = (
                 existing is None
@@ -440,9 +371,9 @@ class MongoPipeline:
             update: dict = {
                 "$set": document,
                 "$setOnInsert": {"created_at": now},
-                "$addToSet": {
-                    "blob_history": {"$each": blob_history_entries}
-                },
+                # Remove history created by older pipeline versions: this
+                # collection now represents only the latest source state.
+                "$unset": {"blob_history": ""},
             }
 
             if has_extracted_content :
@@ -457,7 +388,7 @@ class MongoPipeline:
                 document["scraped_at"] = now
                 if content_changed:
                     document["content_updated_at"] = now
-                update["$unset"] = {"scraping_error": ""}
+                update["$unset"]["scraping_error"] = ""
             else:
                 content_changed = blob_changed
                 current_status = (existing or {}).get("scraping_status")
@@ -468,14 +399,14 @@ class MongoPipeline:
                 }:
                     document["scraping_status"] = "pending"
                 if blob_changed:
-                    update["$unset"] = {
+                    update["$unset"].update({
                         "content": "",
                         "content_hash": "",
                         "content_updated_at": "",
                         "scraped_at": "",
                         "scraped_blob_sha256": "",
                         "scraping_error": "",
-                    }
+                    })
 
             result = self.collection.update_one(
                 {"record_key": record_key},

@@ -123,9 +123,7 @@ def scrape_partition(
 
 def _download_blob(client: Minio, blob: dict[str, Any]) -> bytes:
     bucket = blob.get("bucket")
-    # Prefer the immutable version so extraction remains reproducible even if
-    # another ingestion run overwrites the stable current object concurrently.
-    object_key = blob.get("version_object_key") or blob.get("object_key")
+    object_key = blob.get("object_key")
     if not isinstance(bucket, str) or not bucket:
         raise ValueError("MongoDB record has no MinIO bucket")
     if not isinstance(object_key, str) or not object_key:
