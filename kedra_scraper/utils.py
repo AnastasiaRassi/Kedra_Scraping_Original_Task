@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from hashlib import sha256
 import os
 from pathlib import Path
@@ -9,6 +10,11 @@ from typing import Any
 from scrapy.spidermiddlewares.httperror import HttpError
 from twisted.internet.error import DNSLookupError, TCPTimedOutError, TimeoutError
 from twisted.python.failure import Failure
+
+from kedra_scraper.structured_logging import (
+    log_structured,
+    record_body_metric,
+)
 
 def hash_document(content: str | bytes) -> str:
     """Return a SHA-256 hash for non-empty document content."""
@@ -36,15 +42,31 @@ def handle_request_error(
         raise ValueError(f"Unsupported request kind: {request_kind}")
 
     request = failure.request
-    identifier = request.cb_kwargs.get("identifier", "unknown")
+    identifier = request.cb_kwargs.get("identifier")
+    partition_date = request.cb_kwargs.get("partition_date")
+    body = request.cb_kwargs.get("category")
     stats = spider.crawler.stats
     counter_prefix = "documents" if request_kind == "document" else "search"
 
     stats.inc_value(f"{counter_prefix}/request_failed")
+    record_body_metric(
+        spider,
+        partition_date,
+        body,
+        "request_failures",
+    )
+    if request_kind == "document":
+        record_body_metric(
+            spider,
+            partition_date,
+            body,
+            "failed",
+        )
 
+    status_code = None
     if failure.check(HttpError):
-        status = failure.value.response.status
-        error_type = f"http_{status}"
+        status_code = failure.value.response.status
+        error_type = f"http_{status_code}"
         stats.inc_value(f"errors/{error_type}")
     elif failure.check(DNSLookupError):
         error_type = "dns"
@@ -56,16 +78,19 @@ def handle_request_error(
         error_type = type(failure.value).__name__
         stats.inc_value(f"errors/request/{error_type}")
 
-    spider.logger.error(
-        "%s request failed after retries: identifier=%s url=%s "
-        "error_type=%s detail=%s",
-        request_kind.capitalize(),
-        identifier,
-        request.url,
-        error_type,
-        failure.getErrorMessage(),
+    log_structured(
+        spider.logger,
+        logging.ERROR,
+        f"{request_kind}_request_failed",
+        f"{request_kind.capitalize()} request failed after retries",
+        partition_date=partition_date,
+        body=body,
+        identifier=identifier,
+        url=request.url,
+        status_code=status_code,
+        error_type=error_type,
+        reason=failure.getErrorMessage(),
     )
-
 
 def write_crawl_summary(path_value: str, summary: dict[str, Any]) -> None:
     """Atomically write the machine-readable crawl outcome for orchestration."""
