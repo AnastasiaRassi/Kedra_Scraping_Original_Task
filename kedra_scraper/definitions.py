@@ -85,6 +85,11 @@ def raw_documents(context: AssetExecutionContext) -> MaterializeResult:
         minimum=1.0,
     )
     log_level = os.getenv("DAGSTER_CRAWL_LOG_LEVEL", "INFO").strip().upper()
+    structured_log_path = _dagster_structured_log_path(
+        source_config.key,
+        partition_date,
+        context.run_id,
+    )
 
     with tempfile.TemporaryDirectory(prefix="kedra-ingestion-") as directory:
         summary_path = Path(directory) / "crawl-summary.json"
@@ -104,6 +109,8 @@ def raw_documents(context: AssetExecutionContext) -> MaterializeResult:
             f"CRAWL_SUMMARY_PATH={summary_path}",
             "-s",
             f"LOG_LEVEL={log_level}",
+            "-s",
+            f"STRUCTURED_LOG_PATH={structured_log_path}",
         ]
         for name, value in source_config.spider_settings.items():
             command.extend(("-s", f"{name}={value}"))
@@ -114,6 +121,7 @@ def raw_documents(context: AssetExecutionContext) -> MaterializeResult:
             start_date.isoformat(),
             end_date.isoformat(),
         )
+        context.log.info("Scrapy JSON log: %s", structured_log_path)
         result = _run_scrapy(
             context,
             command,
@@ -126,7 +134,10 @@ def raw_documents(context: AssetExecutionContext) -> MaterializeResult:
             _log_subprocess_tail(context, "stderr", result.stderr)
             raise Failure(
                 description="; ".join(violations),
-                metadata=summary,
+                metadata={
+                    **summary,
+                    "scrapy_log_path": str(structured_log_path),
+                },
                 allow_retries=True,
             )
 
@@ -140,6 +151,7 @@ def raw_documents(context: AssetExecutionContext) -> MaterializeResult:
                 "source": source_config.key,
                 "partition_start": start_date.isoformat(),
                 "partition_end": end_date.isoformat(),
+                "scrapy_log_path": str(structured_log_path),
                 **summary,
             }
         )
@@ -235,6 +247,32 @@ def _partition_context(
     end_date = (window.end - timedelta(days=1)).date()
     return source_config, start_date.isoformat(), start_date, end_date
 
+
+
+def _dagster_structured_log_path(
+    source: str,
+    partition_date: str,
+    run_id: str,
+) -> Path:
+    """Return the retained Scrapy log path for one Dagster asset run."""
+    root = Path(os.getenv("SCRAPY_LOG_DIR", "logs")).expanduser()
+    if not root.is_absolute():
+        root = PROJECT_ROOT / root
+    safe_source = "".join(
+        character if character.isalnum() or character in "._-" else "_"
+        for character in source
+    )
+    safe_run_id = "".join(
+        character if character.isalnum() or character in "._-" else "_"
+        for character in run_id
+    )
+    return (
+        root
+        / "dagster"
+        / (safe_source or "source")
+        / partition_date
+        / f"raw_documents_{safe_run_id or 'run'}.jsonl"
+    )
 
 def _run_scrapy(
     context: AssetExecutionContext,
