@@ -9,6 +9,7 @@ from urllib.parse import urlencode, urlsplit
 import scrapy
 from pypdf import PdfReader
 
+from kedra_scraper.config import apply_source_settings
 from kedra_scraper.spiders.wrc_spider_cfg import (
     WRCSourceConfig,
     load_wrc_source_config,
@@ -31,6 +32,13 @@ from kedra_scraper.utils import (
 
 class WRC_IE_Spider(scrapy.Spider):
     name = "WRC_IE"
+    source_key = "wrc_ie"
+
+    @classmethod
+    def update_settings(cls, settings) -> None:
+        """Load WRC overrides while preserving higher-priority CLI settings."""
+        super().update_settings(settings)
+        apply_source_settings(settings, cls.source_key)
 
     def __init__(
         self,
