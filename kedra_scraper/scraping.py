@@ -11,7 +11,7 @@ from pymongo import MongoClient
 from scrapy import Selector
 
 from kedra_scraper.config import SourceRegistryEntry
-from kedra_scraper.utils import hash_document
+from kedra_scraper.utils import env_bool, env_int, hash_document
 
 
 def scrape_partition(
@@ -25,7 +25,7 @@ def scrape_partition(
     minio_endpoint = _required_env("MINIO_ENDPOINT")
     minio_access_key = _required_env("MINIO_ACCESS_KEY")
     minio_secret_key = _required_env("MINIO_SECRET_KEY")
-    timeout_ms = _env_int(
+    timeout_ms = env_int(
         "MONGO_SERVER_SELECTION_TIMEOUT_MS",
         5000,
         minimum=1,
@@ -39,7 +39,7 @@ def scrape_partition(
         minio_endpoint,
         access_key=minio_access_key,
         secret_key=minio_secret_key,
-        secure=_env_bool("MINIO_SECURE", False),
+        secure=env_bool("MINIO_SECURE", False),
     )
 
     summary = {
@@ -174,7 +174,7 @@ def _extract_content(
 
 
 def _mark_scraping_failed(collection, document: dict, exc: Exception) -> None:
-    error_limit = _env_int(
+    error_limit = env_int(
         "SCRAPING_ERROR_MAX_CHARS",
         500,
         minimum=50,
@@ -202,25 +202,3 @@ def _required_env(name: str) -> str:
         raise ValueError(f"{name} is required for document scraping")
     return value
 
-
-def _env_bool(name: str, default: bool) -> bool:
-    raw_value = os.getenv(name)
-    if raw_value is None:
-        return default
-    value = raw_value.strip().lower()
-    if value in {"1", "true", "yes", "on"}:
-        return True
-    if value in {"0", "false", "no", "off"}:
-        return False
-    raise ValueError(f"{name} must contain a Boolean value")
-
-
-def _env_int(name: str, default: int, *, minimum: int) -> int:
-    raw_value = os.getenv(name)
-    try:
-        value = default if raw_value is None else int(raw_value)
-    except ValueError as exc:
-        raise ValueError(f"{name} must be an integer") from exc
-    if value < minimum:
-        raise ValueError(f"{name} must be at least {minimum}")
-    return value
