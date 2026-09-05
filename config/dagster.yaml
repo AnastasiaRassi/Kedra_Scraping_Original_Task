@@ -1,0 +1,14 @@
+# Dagster instance configuration.
+# Application, spider, partition, persistence, and credential settings remain
+# in .env because kedra_scraper reads them directly.
+#
+# This cross-run limit prevents a backfill from starting many Scrapy processes
+# against the same machine and website at once. Increase it only after measuring
+# combined CPU, memory, storage, and source-server impact.
+concurrency:
+  runs:
+    max_concurrent_runs:
+      env: DAGSTER_MAX_CONCURRENT_RUNS
+
+telemetry:
+  enabled: false
