@@ -70,7 +70,8 @@ class WRC_IE_Spider(scrapy.Spider):
         self.search_url = self.source_config.search_url
         self.source = self.source_config.source
         self.partition_months = settings.getint("SCRAPE_PARTITION_MONTHS")
-        self.scrape_mode = settings.get("SCRAPE_MODE")
+        self.scrape_mode = settings.get("SCRAPE_MODE") # Dagster splits the tasks but the  CLI run keeps
+        # them coupled which is why this toggle matters
 
         if self.partition_months < 1:
             raise ValueError("SCRAPE_PARTITION_MONTHS must be at least 1")

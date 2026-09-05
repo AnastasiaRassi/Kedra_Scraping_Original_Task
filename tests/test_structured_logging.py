@@ -7,7 +7,7 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
-from kedra_scraper.utils.logging import (
+from kedra_scraper.utils.structured_logging import (
     JsonLogFormatter,
     StructuredLoggingExtension,
     body_partition_summaries,
