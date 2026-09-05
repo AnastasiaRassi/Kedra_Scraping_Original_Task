@@ -121,7 +121,7 @@ source. No local credentials belong in source code.
 | Structured logs | `SCRAPY_LOG_DIR`, `SCRAPY_STRUCTURED_LOG_PATH`, `SCRAPY_LOG_MAX_BYTES`, `SCRAPY_LOG_BACKUP_COUNT` |
 | Concurrency | `SCRAPY_CONCURRENT_REQUESTS`, `SCRAPY_CONCURRENT_REQUESTS_PER_DOMAIN`, `SCRAPY_DOWNLOAD_DELAY` |
 | AutoThrottle | `SCRAPY_AUTOTHROTTLE_ENABLED`, `SCRAPY_AUTOTHROTTLE_START_DELAY`, `SCRAPY_AUTOTHROTTLE_MAX_DELAY`, `SCRAPY_AUTOTHROTTLE_TARGET_CONCURRENCY` |
-| Dagster run queue | `DAGSTER_MAX_CONCURRENT_RUNS`, consumed by `config/dagster.yaml` |
+| Dagster run queue | `config/dagster.yaml` (`concurrency.runs.max_concurrent_runs`) |
 | Dagster partitions | `DAGSTER_PARTITION_START_DATE`, `DAGSTER_PARTITION_END_DATE`, `DAGSTER_PARTITION_TIMEZONE`, `DAGSTER_PARTITION_END_OFFSET` |
 | Dagster retries | `DAGSTER_CRAWL_MAX_RETRIES`, `DAGSTER_CRAWL_RETRY_DELAY_SECONDS`, `DAGSTER_CRAWL_TIMEOUT_SECONDS` |
 | Dagster validation | `DAGSTER_ALLOWED_CLOSE_REASONS`, `DAGSTER_MAX_REQUEST_FAILURES`, `DAGSTER_MAX_PERSISTENCE_ERRORS`, `DAGSTER_MAX_UNEXPLAINED_MISSING`, `DAGSTER_FAIL_ON_SCRAPING_ERRORS` |
@@ -318,10 +318,10 @@ docker compose up -d
 
 The launcher copies the tracked `config/dagster.yaml` into
 `$DAGSTER_HOME/dagster.yaml`, then starts the webserver from the repository
-root so Dagster also loads `.env`. The instance file limits simultaneous
-partition runs using `DAGSTER_MAX_CONCURRENT_RUNS`; the other
-`DAGSTER_*` variables remain in `.env` because
-`kedra_scraper/definitions.py` reads them as application settings.
+root so Dagster also loads `.env`. The instance file directly sets the
+maximum number of simultaneous partition runs. The `DAGSTER_*` application
+variables remain in `.env` because `kedra_scraper/definitions.py` reads
+them directly.
 
 Open `http://127.0.0.1:3000`. Select the `document_pipeline_job`, choose a
 `source`/`date` partition, and materialise it. Dagster enforces
