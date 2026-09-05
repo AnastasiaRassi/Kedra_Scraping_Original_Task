@@ -19,6 +19,7 @@ def scrape_partition(
     partition_date: str,
 ) -> dict[str, int]:
     """Extract one source/month from raw MinIO blobs into MongoDB text."""
+    
     mongo_uri = _required_env("MONGO_URI")
     database_name = _required_env("MONGO_DATABASE")
     collection_name = _required_env("MONGO_COLLECTION")
