@@ -15,10 +15,14 @@ from dagster import (
     RetryPolicy,
 )
 
-from kedra_scraper.source_registry import SourceRegistryEntry, SOURCE_REGISTRY
+from kedra_scraper.source_registry import SourceRegistryEntry, load_source_registry
 from kedra_scraper.utils.helpers import env_bool, env_float, env_int
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+
+SOURCE_REGISTRY = load_source_registry(
+    os.getenv("SOURCE_REGISTRY_PATH", "config/sources.json")
+)
 
 TASK_RETRY_POLICY = RetryPolicy(
     max_retries=env_int("DAGSTER_CRAWL_MAX_RETRIES", 2, minimum=0),
