@@ -5,5 +5,7 @@
 __pycache__/
 *.py[cod]
 *.jsonl
-logs/
 reports/
+logs/*
+!logs/.gitkeep
+.tmp_Dagster*/
