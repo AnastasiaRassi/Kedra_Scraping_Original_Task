@@ -11,7 +11,7 @@ from scrapy.spidermiddlewares.httperror import HttpError
 from twisted.internet.error import DNSLookupError, TCPTimedOutError, TimeoutError
 from twisted.python.failure import Failure
 
-from kedra_scraper.utils.logging import (
+from kedra_scraper.utils.structured_logging import (
     log_structured,
     record_body_metric,
 )

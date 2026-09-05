@@ -10,7 +10,7 @@ from pypdf import PdfReader
 from pymongo import MongoClient
 from scrapy import Selector
 
-from kedra_scraper.config import SourceRegistryEntry
+from kedra_scraper.source_registry import SourceRegistryEntry
 from kedra_scraper.utils import env_bool, env_int, hash_document
 
 

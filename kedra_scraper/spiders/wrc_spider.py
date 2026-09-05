@@ -9,8 +9,8 @@ from urllib.parse import urlencode, urlsplit
 import scrapy
 from pypdf import PdfReader
 
-from kedra_scraper.config import apply_source_settings
-from kedra_scraper.spiders.wrc_spider_cfg import (
+from kedra_scraper.source_registry import apply_source_settings
+from kedra_scraper.spiders.wrc_ie_site import (
     WRCSourceConfig,
     load_wrc_source_config,
 )
@@ -18,7 +18,7 @@ from kedra_scraper.items import (
     KedraExtractedDocumentItem,
     KedraRawDocumentItem,
 )
-from kedra_scraper.utils.logging import (
+from kedra_scraper.utils.structured_logging import (
     body_partition_summaries,
     log_structured,
     record_body_metric,
