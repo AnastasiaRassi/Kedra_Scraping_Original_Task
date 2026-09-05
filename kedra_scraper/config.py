@@ -8,11 +8,10 @@ from typing import Any, Mapping
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-# these data classes define the form of the config required per site
-
+# the following data classes define the form of the config required per site
 
 @dataclass(frozen=True)
-class SourceRegistryEntry: # schema of characteristics of a source's spider, representing entries in sources.json
+class SourceRegistryEntry: #for characteristics of a source's spider, representing entries in sources.json
     key: str
     spider: str
     source: str

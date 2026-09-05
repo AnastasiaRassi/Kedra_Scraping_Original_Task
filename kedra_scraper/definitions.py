@@ -29,7 +29,7 @@ from dotenv import load_dotenv
 
 from kedra_scraper.config import SourceRegistryEntry, load_source_registry
 from kedra_scraper.scraping import scrape_partition
-from kedra_scraper.utils import env_bool, env_csv, env_float, env_int
+from kedra_scraper.utils import env_bool, env_float, env_int
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -347,7 +347,6 @@ def _read_summary(path: Path) -> dict[str, Any]:
 
 
 def _ingestion_violations(summary: dict[str, Any]) -> list[str]:
-    allowed_reasons = env_csv("DAGSTER_ALLOWED_CLOSE_REASONS", "finished")
     violations: list[str] = []
     request_failures = _summary_int(
         summary,
@@ -374,7 +373,7 @@ def _ingestion_violations(summary: dict[str, Any]) -> list[str]:
     }
 
     reason = summary.get("reason")
-    if reason not in allowed_reasons:
+    if reason !="finished":
         violations.append(f"unexpected Scrapy close reason: {reason!r}")
 
     for label, (actual, maximum) in limits.items():

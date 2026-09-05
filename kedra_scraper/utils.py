@@ -111,6 +111,9 @@ def env_int(
     *,
     minimum: int | None = None,
 ) -> int:
+    """ Parses an environment variable into an int,
+    falling back to default if unset, and optionally validating
+    that it meets a minimum threshold."""
     raw_value = os.getenv(name)
     try:
         value = default if raw_value is None else int(raw_value)
@@ -123,6 +126,8 @@ def env_int(
 
 
 def env_bool(name: str, default: bool) -> bool:
+    """ Parses an environment variable into a bool,
+    falling back to default if unset"""
     value = os.getenv(name)
     if value is None:
         return default
@@ -144,6 +149,9 @@ def env_float(
     *,
     minimum: float | None = None,
 ) -> float:
+    """ Parses an environment variable into a float,
+    falling back to default if unset, and optionally validating
+    that it meets a minimum threshold."""
     raw_value = os.getenv(name)
     try:
         value = default if raw_value is None else float(raw_value)
@@ -153,14 +161,3 @@ def env_float(
     if minimum is not None and value < minimum:
         raise ValueError(f"{name} must be at least {minimum}")
     return value
-
-def env_csv(name: str, default: str) -> set[str]:
-    values = {
-        item.strip()
-        for item in os.getenv(name, default).split(",")
-        if item.strip()
-    }
-    if not values:
-        raise ValueError(f"{name} must contain at least one value")
-    return values
-
