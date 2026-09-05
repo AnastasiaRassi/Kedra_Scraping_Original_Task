@@ -3,12 +3,11 @@
 # in .env because kedra_scraper reads them directly.
 #
 # This cross-run limit prevents a backfill from starting many Scrapy processes
-# against the same machine and website at once. Increase it only after measuring
-# combined CPU, memory, storage, and source-server impact.
+# against the same machine and website at once. Increase this integer only after
+# measuring combined CPU, memory, storage, and source-server impact.
 concurrency:
   runs:
-    max_concurrent_runs:
-      env: DAGSTER_MAX_CONCURRENT_RUNS
+    max_concurrent_runs: 1
 
 telemetry:
   enabled: false
