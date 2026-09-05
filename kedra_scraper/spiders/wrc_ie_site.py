@@ -11,16 +11,17 @@ from kedra_scraper.source_registry import (
     string_tuple,
     text,
 )
+# these classes are used to validate the structure of the WRC source config JSON files
 
 @dataclass(frozen=True)
-class BodyCategoryConfig:  # The expected form of the categories on a site, for config loading
+class BodyCategoryConfig:  # The expected form of the categories/collections on a site
     name: str
     form_field: str
     form_value: str
 
 
 @dataclass(frozen=True)
-class FormConfig: # like above but the form of the site 
+class FormConfig:  # When we send a post request, this is the expected form of the request
     xpath: str
     start_date_field: str
     end_date_field: str
