@@ -16,7 +16,7 @@ try:
         _build_blob_object_name,
         _retry_with_exponential_backoff,
     )
-    from kedra_scraper.scraping import _download_blob
+    from kedra_scraper.file_content import _download_blob
 except ModuleNotFoundError as exc:
     persistence_dependencies = {
         "itemadapter",

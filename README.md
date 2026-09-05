@@ -42,7 +42,7 @@ Dagster orchestrates two dependent assets for each `source` and calendar
 This is ingestion followed by scraping. The second asset is deliberately
 named `scraped_documents`; its responsibility is document text extraction.
 
-The Dagster definitions are source-agnostic. `config/sources.json` maps a
+The Dagster definitions are source-agnostic. `config/source_registry.json` maps a
 source key to its spider, spider settings, canonical source URL, and the
 setting that points to that site's configuration file. HTML selectors and
 other website-specific rules live only in the site's own configuration file.
@@ -97,9 +97,9 @@ Configuration is intentionally split by scope:
 
 - `.env` contains application runtime values read by the Python assets,
   spiders, persistence clients, and Docker Compose.
-- `config/sources.json` contains per-source spider selection and benchmarked
+- `config/source_registry.json` contains per-source spider selection and benchmarked
   request-rate overrides.
-- Each website configuration file, currently `config/wrc.json`, contains that
+- Each website configuration file, currently `config/wrc_ie.json`, contains that
   site's selectors and form details.
 - `config/dagster.yaml` contains Dagster instance behavior that applies across
   runs, currently the maximum number of simultaneously active partition runs.
@@ -135,7 +135,7 @@ All supported variables and development defaults are listed in
 
 ### Source registry
 
-`config/sources.json` is the orchestration registry. Its keys become Dagster's
+`config/source_registry.json` is the orchestration registry. Its keys become Dagster's
 `source` partitions:
 
 ```json
@@ -145,7 +145,7 @@ All supported variables and development defaults are listed in
       "spider": "WRC_IE",
       "source": "https://www.workplacerelations.ie",
       "spider_settings": {
-        "WRC_CONFIG_PATH": "config/wrc.json",
+        "WRC_CONFIG_PATH": "config/wrc_ie.json",
         "CONCURRENT_REQUESTS_PER_DOMAIN": "6",
         "DOWNLOAD_DELAY": "0.1",
         "AUTOTHROTTLE_ENABLED": "true",
@@ -356,7 +356,7 @@ Every item receives the first date of its partition as `partition_date`.
 
 Dagster uses an explicit two-dimensional partition key:
 
-- `source`: a key from `config/sources.json`
+- `source`: a key from `config/source_registry.json`
 - `date`: the first day of a calendar month
 
 That lets different source/month combinations run independently and, when

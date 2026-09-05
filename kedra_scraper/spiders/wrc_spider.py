@@ -18,7 +18,7 @@ from kedra_scraper.items import (
     KedraExtractedDocumentItem,
     KedraRawDocumentItem,
 )
-from kedra_scraper.structured_logging import (
+from kedra_scraper.utils.logging import (
     body_partition_summaries,
     log_structured,
     record_body_metric,

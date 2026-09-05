@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from ..config import (
-mapping,
-non_empty_string,
-optional_string,
-string_tuple,
-text) 
-from kedra_scraper.config import resolve_project_path
+
+from kedra_scraper.source_registry import (
+    mapping,
+    non_empty_string,
+    optional_string,
+    resolve_project_path,
+    string_tuple,
+    text,
+)
 
 @dataclass(frozen=True)
 class BodyCategoryConfig:  # The expected form of the categories on a site, for config loading

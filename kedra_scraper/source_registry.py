@@ -7,11 +7,11 @@ from typing import Any, Mapping
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_SOURCE_REGISTRY_PATH = "config/source_registry.json"
 
-# the following data classes define the form of the config required per site
 
 @dataclass(frozen=True)
-class SourceRegistryEntry: #for characteristics of a source's spider, representing entries in sources.json
+class SourceRegistryEntry:
     key: str
     spider: str
     source: str
@@ -83,7 +83,7 @@ def load_source_registry(value: str) -> dict[str, SourceRegistryEntry]:
 
 def apply_source_settings(settings: Any, source_key: str) -> None:
     """Apply a source's registry overrides at Scrapy's spider priority."""
-    registry_path = settings.get("SOURCE_REGISTRY_PATH") or "config/sources.json"
+    registry_path = settings.get("SOURCE_REGISTRY_PATH") or DEFAULT_SOURCE_REGISTRY_PATH
     registry = load_source_registry(str(registry_path))
     try:
         source = registry[source_key]

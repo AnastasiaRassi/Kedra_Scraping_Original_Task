@@ -17,7 +17,10 @@ from typing import Any, Protocol
 from dotenv import load_dotenv
 
 from benchmarks.reproducibility import capture_reproducibility_metadata
-from kedra_scraper.config import load_source_registry
+from kedra_scraper.source_registry import (
+    DEFAULT_SOURCE_REGISTRY_PATH,
+    load_source_registry,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -876,7 +879,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--repository")
     parser.add_argument(
         "--registry",
-        default=os.getenv("SOURCE_REGISTRY_PATH", "config/sources.json"),
+        default=os.getenv("SOURCE_REGISTRY_PATH", DEFAULT_SOURCE_REGISTRY_PATH),
     )
     parser.add_argument("--instance-config", type=Path)
     parser.add_argument("--output", type=Path)

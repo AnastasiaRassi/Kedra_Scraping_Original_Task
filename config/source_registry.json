@@ -4,7 +4,7 @@
       "spider": "WRC_IE",
       "source": "https://www.workplacerelations.ie",
       "spider_settings": {
-        "WRC_CONFIG_PATH": "config/wrc.json",
+        "WRC_CONFIG_PATH": "config/wrc_ie.json",
         "CONCURRENT_REQUESTS_PER_DOMAIN": "6",
         "DOWNLOAD_DELAY": "0.1",
         "AUTOTHROTTLE_ENABLED": "true",

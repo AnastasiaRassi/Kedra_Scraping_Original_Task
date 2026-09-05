@@ -28,7 +28,7 @@ from dagster import (
 from dotenv import load_dotenv
 
 from kedra_scraper.config import SourceRegistryEntry, load_source_registry
-from kedra_scraper.scraping import scrape_partition
+from kedra_scraper.file_content import scrape_partition
 from kedra_scraper.utils import env_bool, env_float, env_int, write_crawl_summary
 
 

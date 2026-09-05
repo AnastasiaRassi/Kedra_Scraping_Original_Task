@@ -2,6 +2,7 @@ import os
 
 from dotenv import load_dotenv
 
+from kedra_scraper.source_registry import DEFAULT_SOURCE_REGISTRY_PATH
 from kedra_scraper.utils import env_bool, env_int, env_float
 
 
@@ -16,9 +17,9 @@ ADDONS = {}
 # Source and partition configuration.
 SOURCE_REGISTRY_PATH = os.getenv(
     "SOURCE_REGISTRY_PATH",
-    "config/sources.json",
+    DEFAULT_SOURCE_REGISTRY_PATH,
 )
-WRC_CONFIG_PATH = os.getenv("WRC_CONFIG_PATH", "config/wrc.json")
+WRC_CONFIG_PATH = os.getenv("WRC_CONFIG_PATH", "config/wrc_ie.json")
 SCRAPE_START_DATE = os.getenv("SCRAPE_START_DATE")
 SCRAPE_END_DATE = os.getenv("SCRAPE_END_DATE")
 SCRAPE_PARTITION_MONTHS = env_int(
@@ -67,7 +68,7 @@ DEFAULT_REQUEST_HEADERS = {
 }
 
 # Conservative cross-site fallbacks. A spider may load benchmarked overrides
-# from config/sources.json. Do not raise these global defaults based on one
+# from config/source_registry.json. Do not raise these global defaults based on one
 # website's benchmark because every host has different capacity and limits.
 # Explicit command-line settings (-s NAME=VALUE) still take highest priority.
 # Concurrency, throttling and resilience.
@@ -161,7 +162,7 @@ MINIO_PREFIX = os.getenv("MINIO_PREFIX", "documents")
 # Structured JSON logging is always enabled. The profiler remains dormant
 # unless CRAWL_PROFILE_PATH is supplied.
 EXTENSIONS = {
-    "kedra_scraper.structured_logging.StructuredLoggingExtension": 100,
+    "kedra_scraper.utils.structured_logging.StructuredLoggingExtension": 100,
     "benchmarks.extensions.CrawlProfilerExtension": 500,
 }
 

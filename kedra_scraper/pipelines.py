@@ -21,7 +21,7 @@ from pymongo.errors import (
 from scrapy.exceptions import DropItem
 from urllib3.exceptions import HTTPError as Urllib3HTTPError
 
-from kedra_scraper.structured_logging import log_structured
+from kedra_scraper.utils.logging import log_structured
 from kedra_scraper.utils import hash_document
 
 
