@@ -11,7 +11,9 @@ DEFAULT_SOURCE_REGISTRY_PATH = "config/source_registry.json"
 
 
 @dataclass(frozen=True)
-class SourceRegistryEntry:
+class SourceRegistryEntry: 
+    # Each new source gets an entry in the source registry, 
+    # which is used to configure the generic Dagster assets.
     key: str
     spider: str
     source: str
@@ -100,17 +102,19 @@ def apply_source_settings(settings: Any, source_key: str) -> None:
 
 
 def load_html_content_selectors(value: str) -> tuple[str, ...]:
-    """Load generic extraction selectors from a site's own config file."""
+    """ Load generic extraction selectors from a site's own config file.(value) """
+    
     path = resolve_project_path(value)
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        raw_site_cfg = json.loads(path.read_text(encoding="utf-8"))
+
     except FileNotFoundError as exc:
         raise ValueError(f"Site config does not exist: {path}") from exc
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise ValueError(f"Cannot read site config {path}: {exc}") from exc
 
-    root = mapping(raw, "site config root")
-    selectors = mapping(root.get("selectors"), "site config selectors")
+    site_cfg_root = mapping(raw_site_cfg, "site config root") 
+    selectors = mapping(site_cfg_root.get("selectors"), "site config selectors")
     return string_tuple(
         selectors.get("html_content"),
         "site config selectors.html_content",
@@ -124,12 +128,14 @@ def resolve_project_path(value: str) -> Path:
 
 
 def mapping(value: Any, name: str) -> Mapping[str, Any]:
+    # check the value is a mapping
     if not isinstance(value, dict):
         raise ValueError(f"{name} must be an object")
     return value
 
 
 def text(mapping: Mapping[str, Any], key: str, context: str) -> str:
+    """Extract a non-empty string from a mapping, with context for error messages."""
     return non_empty_string(mapping.get(key), f"{context}.{key}")
 
 
