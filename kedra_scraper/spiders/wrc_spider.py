@@ -100,16 +100,19 @@ class WRC_IE_Spider(scrapy.Spider):
     async def start(self):
         """Load the ASP.NET search form before submitting its partitions."""
         query = urlencode(self.source_config.search_query)
-        separator = "&" if "?" in self.search_url else "?"
+        separator = "&" if "?" in self.search_url else "?" # since ? is already in the search_url and it appears once only, we need to use & to append the query parameters
         url = f"{self.search_url}{separator}{query}" if query else self.search_url
         yield scrapy.Request(
             url=url,
-            callback=self.start_partition_searches,
+            callback=self.start_partition_searches, # after loading the search form, submit one search for each partition and category
             errback=self.handle_search_request_error,
         )
 
     def start_partition_searches(self, response):
-        """Submit one POST search for every period and Body category."""
+        """Submit one POST search for every period and Body category. 
+        Loops over the period partitions and the body categories, and 
+        submits a search form for each combination."""
+
         for partition_start, partition_end in self._period_partitions(
             self.start_date,
             self.end_date,
@@ -141,7 +144,7 @@ class WRC_IE_Spider(scrapy.Spider):
                     response,
                     formxpath=form.xpath,
                     formdata=form_data,
-                    callback=self.parse,
+                    callback=self.parse, # once the search results page is loaded, parse the results and schedule document requests
                     errback=self.handle_search_request_error,
                     cb_kwargs={
                         "category": category_config.name,
@@ -150,20 +153,23 @@ class WRC_IE_Spider(scrapy.Spider):
                 )
 
     def parse(self, response, category: str, partition_date: str):
-        """Read one results page, follow documents, then follow pagination."""
+        """Parse a single search results page, validate metadata, and schedule document requests.
+
+            Iterates through result cards on the page, records metrics for reconciliation, 
+            and validates mandatory fields.
+            Incomplete cards are logged and skipped. Valid entries are dynamically 
+            routed to either the PDF or standard document parser with full callback arguments.
+
+            Yields:
+                scrapy.Request: Follow-up requests for individual documents or pagination.
+            """        
         selectors = self.source_config.selectors
         result_cards = response.css(selectors.result_card)
         self.crawler.stats.inc_value(
             "documents/expected",
             count=len(result_cards),
         )
-        record_body_metric(
-            self,
-            partition_date,
-            category,
-            "found",
-            count=len(result_cards),
-        )
+        record_body_metric(self, partition_date, category, "found", count=len(result_cards))
 
         if not result_cards:
             self.logger.debug("No results found at %s", response.url)
@@ -185,12 +191,7 @@ class WRC_IE_Spider(scrapy.Spider):
 
             if not document_href or not title or not published_date:
                 self.crawler.stats.inc_value("documents/incomplete_result")
-                record_body_metric(
-                    self,
-                    partition_date,
-                    category,
-                    "failed",
-                )
+                record_body_metric(self, partition_date, category,"failed",)
                 log_structured(
                     self.logger,
                     logging.WARNING,
@@ -210,7 +211,7 @@ class WRC_IE_Spider(scrapy.Spider):
 
             self.crawler.stats.inc_value("documents/scheduled")
             document_url = response.urljoin(document_href)
-            callback = (
+            callback = ( # what occurs after the document URL is fetched, parse pdf or document(html) depends on the extension .pdf or .html
                 self.parse_pdf
                 if self._is_pdf_url(document_url)
                 else self.parse_document

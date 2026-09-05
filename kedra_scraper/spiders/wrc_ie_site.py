@@ -29,6 +29,8 @@ class FormConfig:  # When we send a post request, this is the expected form of t
     submit_field: str
     submit_value: str
 
+# note: selectors & forms both reference the html of the webpage, but, one is for extracting data 
+# from the page, and the other is for submitting a form to get the data.
 
 @dataclass(frozen=True)
 class SelectorConfig:
@@ -46,7 +48,7 @@ class SelectorConfig:
 # for a WRC source configuration
 @dataclass(frozen=True)
 class WRCSourceConfig:
-    source: str
+    source: str 
     search_url: str
     allowed_domains: tuple[str, ...]
     search_query: dict[str, str]
