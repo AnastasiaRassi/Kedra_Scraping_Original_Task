@@ -11,13 +11,14 @@ from kedra_scraper.source_registry import (
     string_tuple,
     text,
 )
-# these classes are used to validate the structure of the WRC source config JSON files
+
+# these dataclasses represent the structure of the WRC source configuration JSON file
 
 @dataclass(frozen=True)
-class BodyCategoryConfig:  # The expected form of the categories/collections on a site
+class BodyCategoryConfig: 
     name: str
-    form_field: str
-    form_value: str
+    form_field: str # the form field name to use for this category when submitting the search form
+    form_value: str # the form field value to use for this category when submitting the search form
 
 
 @dataclass(frozen=True)
@@ -40,6 +41,9 @@ class SelectorConfig:
     pdf_download: str
     html_content: tuple[str, ...]
 
+
+# this dataclass represents the overall structure combining the form, selectors, and body categories
+# for a WRC source configuration
 @dataclass(frozen=True)
 class WRCSourceConfig:
     source: str
