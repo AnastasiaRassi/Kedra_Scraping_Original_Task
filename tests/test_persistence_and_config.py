@@ -7,7 +7,11 @@ from hashlib import sha256
 from pathlib import Path
 from types import SimpleNamespace
 
-from kedra_scraper.config import apply_source_settings, load_source_registry
+from kedra_scraper.source_registry import (
+    apply_source_settings,
+    load_source_registry,
+)
+from kedra_scraper.spiders.wrc_ie_site import load_wrc_source_config
 
 try:
     from kedra_scraper.pipelines import (
@@ -423,6 +427,54 @@ class PersistenceUpsertTests(unittest.TestCase):
 
 
 class SiteConfigTests(unittest.TestCase):
+    def test_wrc_config_loads_typed_runtime_values(self) -> None:
+        config = load_wrc_source_config("config/wrc_ie.json")
+
+        self.assertEqual(config.source, "https://www.workplacerelations.ie")
+        self.assertIsInstance(config.allowed_domains, tuple)
+        self.assertIsInstance(config.body_categories, tuple)
+        self.assertIsInstance(config.selectors.html_content, tuple)
+
+    def test_registry_rejects_non_string_spider_setting(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            site_config_path = root / "site.json"
+            site_config_path.write_text(
+                json.dumps(
+                    {"selectors": {"html_content": ["main article"]}}
+                ),
+                encoding="utf-8",
+            )
+            registry_path = root / "sources.json"
+            registry_path.write_text(
+                json.dumps(
+                    {
+                        "sources": {
+                            "example": {
+                                "spider": "example_spider",
+                                "source": "https://example.test",
+                                "spider_settings": {
+                                    "EXAMPLE_CONFIG_PATH": str(
+                                        site_config_path
+                                    ),
+                                    "CONCURRENT_REQUESTS_PER_DOMAIN": 5,
+                                },
+                                "site_config_setting": (
+                                    "EXAMPLE_CONFIG_PATH"
+                                ),
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "CONCURRENT_REQUESTS_PER_DOMAIN.*non-empty string",
+            ):
+                load_source_registry(str(registry_path))
+
     def test_registry_loads_html_selectors_from_site_config(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
