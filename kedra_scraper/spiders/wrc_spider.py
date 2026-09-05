@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime, timedelta
 from io import BytesIO
-from typing import Iterator, Literal
+from typing import Iterator
 from urllib.parse import urlencode, urlsplit
 
 import scrapy
@@ -294,16 +294,18 @@ class WRC_IE_Spider(scrapy.Spider):
 
         if self.scrape_mode == "ingestion":
             self.crawler.stats.inc_value("documents/html_ingested")
-            yield self._raw_item(
-                response=response,
+            yield KedraRawDocumentItem(
                 title=title,
-                identifier=identifier,
                 published_date=published_date,
                 partition_date=partition_date,
+                identifier=identifier,
+                source=self.source,
                 category=category,
-                description=description,
-                landing_url=landing_url,
                 source_format="html",
+                doc_url=response.url,
+                landing_url=landing_url,
+                raw_content=response.body,
+                description=description,
             )
             return
 
@@ -352,15 +354,7 @@ class WRC_IE_Spider(scrapy.Spider):
             )
             return
 
-        content_hash = self._hash_content(
-            content,
-            identifier=identifier,
-            url=response.url,
-            partition_date=partition_date,
-            category=category,
-        )
-        if content_hash is None:
-            return
+        content_hash = hash_document(content)
 
         self.crawler.stats.inc_value("documents/html_extracted")
         yield KedraExtractedDocumentItem(
@@ -393,16 +387,18 @@ class WRC_IE_Spider(scrapy.Spider):
         """Extract text from a PDF document."""
         if self.scrape_mode == "ingestion":
             self.crawler.stats.inc_value("documents/pdf_ingested")
-            yield self._raw_item(
-                response=response,
+            yield KedraRawDocumentItem(
                 title=title,
-                identifier=identifier,
                 published_date=published_date,
                 partition_date=partition_date,
+                identifier=identifier,
+                source=self.source,
                 category=category,
-                description=description,
-                landing_url=landing_url,
                 source_format="pdf",
+                doc_url=response.url,
+                landing_url=landing_url,
+                raw_content=response.body,
+                description=description,
             )
             return
 
@@ -452,15 +448,7 @@ class WRC_IE_Spider(scrapy.Spider):
             )
             return
 
-        content_hash = self._hash_content(
-            content,
-            identifier=identifier,
-            url=response.url,
-            partition_date=partition_date,
-            category=category,
-        )
-        if content_hash is None:
-            return
+        content_hash = hash_document(content)
 
         self.crawler.stats.inc_value("documents/pdf_extracted")
         yield KedraExtractedDocumentItem(
@@ -478,62 +466,6 @@ class WRC_IE_Spider(scrapy.Spider):
             raw_content=response.body,
             description=description,
         )
-
-    def _raw_item(
-        self,
-        response,
-        title: str,
-        identifier: str | None,
-        published_date: str,
-        partition_date: str,
-        category: str,
-        description: str | None,
-        landing_url: str,
-        source_format: Literal["html", "pdf"],
-    ) -> KedraRawDocumentItem:
-        return KedraRawDocumentItem(
-            title=title,
-            published_date=published_date,
-            partition_date=partition_date,
-            identifier=identifier,
-            source=self.source,
-            category=category,
-            source_format=source_format,
-            doc_url=response.url,
-            landing_url=landing_url,
-            raw_content=response.body,
-            description=description,
-        )
-
-    def _hash_content(
-        self,
-        content: str,
-        identifier: str | None,
-        url: str,
-        partition_date: str,
-        category: str,
-    ) -> str | None:
-        """Hash extracted content while accounting for unexpected failures."""
-        try:
-            return hash_document(content)
-        except (TypeError, ValueError, UnicodeError) as exc:
-            self.crawler.stats.inc_value("errors/document_hashing")
-            record_body_metric(self, partition_date, category, "failed")
-            log_structured(
-                self.logger,
-                logging.ERROR,
-                "content_hash_failed",
-                "Document content hashing failed",
-                exc_info=True,
-                partition_date=partition_date,
-                body=category,
-                identifier=identifier,
-                url=url,
-                status_code=None,
-                error_type=type(exc).__name__,
-                reason=str(exc),
-            )
-            return None
 
     def handle_request_error(self, failure) -> None:
         """Delegate request-failure recording to the shared utility."""
@@ -562,7 +494,6 @@ class WRC_IE_Spider(scrapy.Spider):
                 "errors/html_empty",
                 "errors/pdf_parsing",
                 "errors/pdf_empty",
-                "errors/document_hashing",
             )
         )
         dropped = stats.get_value("item_dropped_count", 0)
