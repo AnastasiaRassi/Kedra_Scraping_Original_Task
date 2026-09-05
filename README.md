@@ -93,9 +93,20 @@ credentials stored in the existing volume.
 
 ## Configuration
 
+Configuration is intentionally split by scope:
+
+- `.env` contains application runtime values read by the Python assets,
+  spiders, persistence clients, and Docker Compose.
+- `config/sources.json` contains per-source spider selection and benchmarked
+  request-rate overrides.
+- Each website configuration file, currently `config/wrc.json`, contains that
+  site's selectors and form details.
+- `config/dagster.yaml` contains Dagster instance behavior that applies across
+  runs, currently the maximum number of simultaneously active partition runs.
+
 All connection strings, storage locations, partition settings, crawl tuning,
-and Dagster retry settings are configurable through `.env` or JSON source
-configuration. No local credentials belong in source code.
+and Dagster retry settings are therefore configurable without changing Python
+source. No local credentials belong in source code.
 
 | Area | Main variables |
 | --- | --- |
@@ -110,9 +121,12 @@ configuration. No local credentials belong in source code.
 | Structured logs | `SCRAPY_LOG_DIR`, `SCRAPY_STRUCTURED_LOG_PATH`, `SCRAPY_LOG_MAX_BYTES`, `SCRAPY_LOG_BACKUP_COUNT` |
 | Concurrency | `SCRAPY_CONCURRENT_REQUESTS`, `SCRAPY_CONCURRENT_REQUESTS_PER_DOMAIN`, `SCRAPY_DOWNLOAD_DELAY` |
 | AutoThrottle | `SCRAPY_AUTOTHROTTLE_ENABLED`, `SCRAPY_AUTOTHROTTLE_START_DELAY`, `SCRAPY_AUTOTHROTTLE_MAX_DELAY`, `SCRAPY_AUTOTHROTTLE_TARGET_CONCURRENCY` |
+| Dagster run queue | `DAGSTER_MAX_CONCURRENT_RUNS`, consumed by `config/dagster.yaml` |
 | Dagster partitions | `DAGSTER_PARTITION_START_DATE`, `DAGSTER_PARTITION_END_DATE`, `DAGSTER_PARTITION_TIMEZONE`, `DAGSTER_PARTITION_END_OFFSET` |
 | Dagster retries | `DAGSTER_CRAWL_MAX_RETRIES`, `DAGSTER_CRAWL_RETRY_DELAY_SECONDS`, `DAGSTER_CRAWL_TIMEOUT_SECONDS` |
-| Dagster validation | `DAGSTER_ALLOWED_CLOSE_REASONS`, `DAGSTER_MAX_REQUEST_FAILURES`, `DAGSTER_MAX_PERSISTENCE_ERRORS`, `DAGSTER_MAX_UNEXPLAINED_MISSING` |
+| Dagster validation | `DAGSTER_ALLOWED_CLOSE_REASONS`, `DAGSTER_MAX_REQUEST_FAILURES`, `DAGSTER_MAX_PERSISTENCE_ERRORS`, `DAGSTER_MAX_UNEXPLAINED_MISSING`, `DAGSTER_FAIL_ON_SCRAPING_ERRORS` |
+| Dagster log tail | `DAGSTER_CRAWL_LOG_LEVEL`, `DAGSTER_SUBPROCESS_LOG_TAIL_LINES`, `DAGSTER_SUBPROCESS_LOG_TAIL_CHARACTERS` |
+| Stored extraction errors | `SCRAPING_ERROR_MAX_CHARS` |
 | Schedule | `DAGSTER_SCHEDULE_CRON` |
 
 All supported variables and development defaults are listed in
@@ -295,14 +309,19 @@ and MinIO. In `.env`, set:
 PERSISTENCE_ENABLED=true
 ```
 
-Start the storage containers, then start Dagster:
+Start the storage containers, then use the included launcher:
 
 ```powershell
 docker compose up -d
-New-Item -ItemType Directory -Force .dagster
-$env:DAGSTER_HOME = (Resolve-Path .dagster).Path
-dagster dev -m kedra_scraper.definitions
+.\scripts\start_dagster.ps1
 ```
+
+The launcher copies the tracked `config/dagster.yaml` into
+`$DAGSTER_HOME/dagster.yaml`, then starts the webserver from the repository
+root so Dagster also loads `.env`. The instance file limits simultaneous
+partition runs using `DAGSTER_MAX_CONCURRENT_RUNS`; the other
+`DAGSTER_*` variables remain in `.env` because
+`kedra_scraper/definitions.py` reads them as application settings.
 
 Open `http://127.0.0.1:3000`. Select the `document_pipeline_job`, choose a
 `source`/`date` partition, and materialise it. Dagster enforces
