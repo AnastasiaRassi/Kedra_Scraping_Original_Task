@@ -5,6 +5,7 @@ python-dotenv>=1.0,<2.0
 minio>=7.2,<8
 dagster
 dagster-webserver
+dagster-graphql
 dagster-dg-cli
 
 # if this wasnt a task for practicing I'd define specific versions for the dependencies

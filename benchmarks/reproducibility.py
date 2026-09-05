@@ -25,6 +25,7 @@ DEPENDENCIES = (
     "minio",
     "dagster",
     "dagster-webserver",
+    "dagster-graphql",
     "Twisted",
     "lxml",
 )

@@ -29,7 +29,7 @@ from dotenv import load_dotenv
 
 from kedra_scraper.config import SourceRegistryEntry, load_source_registry
 from kedra_scraper.scraping import scrape_partition
-from kedra_scraper.utils import env_bool, env_float, env_int
+from kedra_scraper.utils import env_bool, env_float, env_int, write_crawl_summary
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -90,6 +90,7 @@ def raw_documents(context: AssetExecutionContext) -> MaterializeResult:
         partition_date,
         context.run_id,
     )
+    crawl_profile_path = structured_log_path.with_suffix(".profile.json")
 
     with tempfile.TemporaryDirectory(prefix="kedra-ingestion-") as directory:
         summary_path = Path(directory) / "crawl-summary.json"
@@ -111,6 +112,10 @@ def raw_documents(context: AssetExecutionContext) -> MaterializeResult:
             f"LOG_LEVEL={log_level}",
             "-s",
             f"STRUCTURED_LOG_PATH={structured_log_path}",
+            "-s",
+            f"CRAWL_PROFILE_PATH={crawl_profile_path}",
+            "-s",
+            f"CRAWL_PROFILE_SOURCE={source_config.key}",
         ]
         for name, value in source_config.spider_settings.items():
             command.extend(("-s", f"{name}={value}"))
@@ -122,6 +127,7 @@ def raw_documents(context: AssetExecutionContext) -> MaterializeResult:
             end_date.isoformat(),
         )
         context.log.info("Scrapy JSON log: %s", structured_log_path)
+        context.log.info("Scrapy crawl profile: %s", crawl_profile_path)
         result = _run_scrapy(
             context,
             command,
@@ -137,6 +143,7 @@ def raw_documents(context: AssetExecutionContext) -> MaterializeResult:
                 metadata={
                     **summary,
                     "scrapy_log_path": str(structured_log_path),
+                    "crawl_profile_path": str(crawl_profile_path),
                 },
                 allow_retries=True,
             )
@@ -152,6 +159,7 @@ def raw_documents(context: AssetExecutionContext) -> MaterializeResult:
                 "partition_start": start_date.isoformat(),
                 "partition_end": end_date.isoformat(),
                 "scrapy_log_path": str(structured_log_path),
+                "crawl_profile_path": str(crawl_profile_path),
                 **summary,
             }
         )
@@ -179,9 +187,26 @@ def scraped_documents(context: AssetExecutionContext) -> MaterializeResult:
         source_config.key,
         partition_date,
     )
+    summary_path = _dagster_scraping_summary_path(
+        source_config.key,
+        partition_date,
+        context.run_id,
+    )
     try:
         summary = scrape_partition(source_config, partition_date)
     except Exception as exc:
+        write_crawl_summary(
+            str(summary_path),
+            {
+                "source": source_config.key,
+                "partition_date": partition_date,
+                "raw_documents": 0,
+                "scraped": 0,
+                "unchanged": 0,
+                "scraping_failed": 0,
+                "operational_failure": f"{type(exc).__name__}: {exc}",
+            },
+        )
         raise Failure(
             description=(
                 f"Scraping failed operationally for source="
@@ -189,6 +214,15 @@ def scraped_documents(context: AssetExecutionContext) -> MaterializeResult:
             ),
             allow_retries=True,
         ) from exc
+
+    write_crawl_summary(
+        str(summary_path),
+        {
+            "source": source_config.key,
+            "partition_date": partition_date,
+            **summary,
+        },
+    )
 
     failed = summary["scraping_failed"]
     if failed:
@@ -217,6 +251,7 @@ def scraped_documents(context: AssetExecutionContext) -> MaterializeResult:
             "source": source_config.key,
             "partition_start": start_date.isoformat(),
             "partition_end": end_date.isoformat(),
+            "scraping_summary_path": str(summary_path),
             **summary,
         }
     )
@@ -273,6 +308,21 @@ def _dagster_structured_log_path(
         / partition_date
         / f"raw_documents_{safe_run_id or 'run'}.jsonl"
     )
+
+
+def _dagster_scraping_summary_path(
+    source: str,
+    partition_date: str,
+    run_id: str,
+) -> Path:
+    log_path = _dagster_structured_log_path(source, partition_date, run_id)
+    return log_path.with_name(
+        log_path.name.replace("raw_documents_", "scraped_documents_").replace(
+            ".jsonl",
+            ".summary.json",
+        )
+    )
+
 
 def _run_scrapy(
     context: AssetExecutionContext,
@@ -373,7 +423,7 @@ def _ingestion_violations(summary: dict[str, Any]) -> list[str]:
     }
 
     reason = summary.get("reason")
-    if reason !="finished":
+    if reason != "finished":
         violations.append(f"unexpected Scrapy close reason: {reason!r}")
 
     for label, (actual, maximum) in limits.items():

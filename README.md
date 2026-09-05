@@ -124,7 +124,8 @@ source. No local credentials belong in source code.
 | Dagster run queue | `config/dagster.yaml` (`concurrency.runs.max_concurrent_runs`) |
 | Dagster partitions | `DAGSTER_PARTITION_START_DATE`, `DAGSTER_PARTITION_END_DATE`, `DAGSTER_PARTITION_TIMEZONE`, `DAGSTER_PARTITION_END_OFFSET` |
 | Dagster retries | `DAGSTER_CRAWL_MAX_RETRIES`, `DAGSTER_CRAWL_RETRY_DELAY_SECONDS`, `DAGSTER_CRAWL_TIMEOUT_SECONDS` |
-| Dagster validation | `DAGSTER_ALLOWED_CLOSE_REASONS`, `DAGSTER_MAX_REQUEST_FAILURES`, `DAGSTER_MAX_PERSISTENCE_ERRORS`, `DAGSTER_MAX_UNEXPLAINED_MISSING`, `DAGSTER_FAIL_ON_SCRAPING_ERRORS` |
+| Dagster load profiling | `DAGSTER_BENCHMARK_TIMEOUT_SECONDS` |
+| Dagster validation | `DAGSTER_MAX_REQUEST_FAILURES`, `DAGSTER_MAX_PERSISTENCE_ERRORS`, `DAGSTER_MAX_UNEXPLAINED_MISSING`, `DAGSTER_FAIL_ON_SCRAPING_ERRORS` |
 | Dagster log tail | `DAGSTER_CRAWL_LOG_LEVEL`, `DAGSTER_SUBPROCESS_LOG_TAIL_LINES`, `DAGSTER_SUBPROCESS_LOG_TAIL_CHARACTERS` |
 | Stored extraction errors | `SCRAPING_ERROR_MAX_CHARS` |
 | Schedule | `DAGSTER_SCHEDULE_CRON` |
@@ -157,10 +158,10 @@ All supported variables and development defaults are listed in
 ```
 
 The `spider_settings` values override the conservative global request-rate
-defaults for that source. Direct Scrapy crawls, profiler runs using `--source`,
-and Dagster ingestion all load the same overrides. Explicit command-line
-`-s NAME=VALUE` settings have the highest priority and are intended for
-experiments.
+defaults for that source. Direct Scrapy crawls and Dagster ingestion load the
+same overrides; the load profiler submits that Dagster job rather than
+reimplementing the settings. Explicit `-s NAME=VALUE` values can still override
+settings during isolated direct-crawl experiments.
 
 Global rate settings must remain conservative because a benchmark against one
 website says nothing about another website's capacity or blocking policy. Add
@@ -207,98 +208,103 @@ scrapy crawl WRC_IE `
 Several requests may already be in flight, so a limit of 100 can produce
 slightly more than 100 items before the spider stops.
 
-## Profile a spider
+## Profile Dagster multi-partition load
 
-The opt-in crawl profiler runs any registered source or spider and writes a
-timestamped JSON report. Persistence is disabled unless
-`--with-persistence` is supplied, so profiling does not modify MongoDB or
-MinIO by default.
+The profiler exercises the production-shaped path: it submits the real
+`document_pipeline_job` once for every selected source/month and lets
+Dagster's run queue decide how many partitions overlap. The former
+single-spider benchmark is no longer the primary performance test because it
+could not expose cross-partition contention in Dagster, MongoDB, MinIO, or the
+source website.
 
-Run a bounded profile through the source registry:
+Start storage and Dagster first:
+
+```powershell
+docker compose up -d
+.\scripts\start_dagster.ps1
+```
+
+Keep that terminal open. In a second activated terminal, profile at least two
+monthly partitions:
 
 ```powershell
 python -m benchmarks.crawl_profiler `
   --source wrc_ie `
-  -a start_date=01-01-2008 `
-  -a end_date=31-01-2008 `
+  --start-partition 2026-01-01 `
+  --end-partition 2026-03-01 `
+  --expect-max-concurrent-runs 1 `
   --require-clean-git
 ```
 
-Using `--source wrc_ie` applies the WRC settings registered in
-`config/sources.json`. Use `--spider WRC_IE` to address the spider
-directly. Repeat `-a NAME=VALUE` for spider arguments and `-s NAME=VALUE`
-for temporary settings being evaluated; explicit `-s` values override both
-the source profile and global defaults.
+Both partition arguments are inclusive and must use `YYYY-MM-01`. The
+default safety limit is 12 partitions; raise it deliberately with
+`--max-partitions N` for a larger load test. The command uses
+`http://127.0.0.1:3000` by default. Repository names are inferred when the
+deployment exposes only one matching job; otherwise pass
+`--repository-location` and `--repository`.
 
-The current WRC profile was selected from a complete January 2008 partition.
-With per-domain concurrency 6, a 0.1-second minimum delay, and AutoThrottle
-target concurrency 3, the observed run scraped 150 of 151 discovered records
-in 57.8 seconds (approximately 155.7 documents/minute), with zero request
-failures, retries, blocked responses, or unexplained missing records. The one
-extraction failure was a known empty duplicate landing page. These results
-justify the WRC override only; they are not global defaults and should be
-revalidated periodically and under representative conditions.
+The active limit is read from `$DAGSTER_HOME/dagster.yaml` (or
+`.dagster/dagster.yaml`). `--expect-max-concurrent-runs` prevents measuring
+the wrong queue configuration. To compare limits, change the tracked
+`config/dagster.yaml`, restart Dagster through the launcher, and repeat the
+same source and partition range. The profiler does not silently reconfigure a
+running Dagster instance.
 
-The matching structured event stream is retained under
-`logs/profiles/<profile name>.jsonl` and its path is printed when the run
-starts.
+Reports are written under `reports/dagster_load_profiles/`. Each report
+contains:
 
-Each report under `reports/crawl_profiles/` records:
+- Requested partitions, Dagster run IDs, final statuses, queue time, execution
+  time, and observed peak active runs.
+- End-to-end wall time and aggregate records/minute across all partitions.
+- Expected, ingested, newly scraped, unchanged, missing, and failed document
+  counts, plus found/succeeded/failed reconciliation for every source body and
+  month.
+- Request/response counts, bytes, HTTP status totals, and cross-partition
+  latency summaries.
+- Scrapy retry attempts, recovered and exhausted retry chains, plus observed
+  Dagster raw-asset retries.
+- Persistence counters for MinIO and MongoDB.
+- Exact structured failure events, including URL, status code, error type, and
+  reason when available.
+- Git revision, dirty state, Python/dependency versions, source settings, and
+  source/Dagster configuration fingerprints.
 
-- Every spider argument, including `start_date` and `end_date`.
-- The final effective concurrency, throttling, timeout and retry settings.
-- The Git commit, branch, dirty-state flag, and tracked-diff fingerprint.
-- Python, platform, CPU, direct dependency versions, and a complete installed-distribution snapshot with its own digest.
-- SHA-256 fingerprints for the source registry, site configuration, and
-  `requirements.txt`.
-- Duration, scraped documents per minute and response-byte volume.
-- Response-latency minimum, mean, p50, p95, p99 and maximum.
-- HTTP status counts and rates, including `403`, `429` and combined `5xx`.
-- Retry attempts, successful retry chains, exhausted chains and recovery rate.
-- Expected, scraped, missing, dropped and extraction-failure counts.
+Each Dagster run now writes a crawl profile beside its structured log and a
+summary for the downstream scraping asset:
 
-Credential-like command arguments are represented by a SHA-256 fingerprint,
-not written in plaintext. Use `--require-clean-git` for a formal benchmark;
-it refuses to run when local code differs from the recorded commit. Omit it
-while experimenting if you deliberately want to measure uncommitted code.
+```text
+logs/dagster/<source>/<partition>/raw_documents_<run-id>.jsonl
+logs/dagster/<source>/<partition>/raw_documents_<run-id>.profile.json
+logs/dagster/<source>/<partition>/scraped_documents_<run-id>.summary.json
+```
 
-This makes the benchmark configuration reconstructable and auditable, but it
-does not promise byte-for-byte replay of a live website. Exact replay would
-also require archiving every HTTP response, which would add storage I/O and
-change the performance being measured. The report states
-`response_replay.available=false` explicitly.
+A successful command exits with code 0. It exits with code 1 and still writes
+the report when any partition fails, the profiler times out, a profile/summary
+is missing, final request or persistence failures occur, unexplained raw
+documents are missing, or document scraping fails.
 
-When `--max-items` stops a sampled crawl, the report leaves
-`unexplained_missing` unevaluated because the crawl was intentionally
-incomplete. Use an uncapped representative partition to assess completeness.
+`newly_scraped` and `unchanged` remain separate. A warm idempotent rerun can
+be faster because unchanged blobs skip extraction; the report must not present
+that as equivalent to a cold first ingestion. Compare like-for-like runs.
 
-The deterministic profiler calculations and failure handling can be tested
-without contacting a website:
+Use `--require-clean-git` for evidence you will report. Omit it only while
+intentionally measuring uncommitted code. The report reconstructs code,
+configuration, inputs, and runtime versions, but does not archive live HTTP
+responses, so byte-for-byte replay of a changing website is not promised.
+
+The deterministic profile calculations and failure handling can be tested
+without contacting the website:
 
 ```powershell
 python -m unittest discover -s tests -v
 ```
 
-The request-failure tests inject retryable timeouts and final HTTP/timeout
-failures. They verify that three configured retries create three replacement
-requests, the next failure is marked exhausted, and final failures preserve
-their URL, HTTP status when available, exact reason, and body/month
-reconciliation counters. The timeout test is simulated and does not actually
-wait 30 seconds.
-
-The persistence tests inject one temporary MinIO upload failure and one
-temporary MongoDB upsert failure. They verify recovery, retry counters, the
-bounded exponential delay sequence, and that deterministic failures are not
-retried. No live storage service is contacted.
-
-To run only these tests:
-
-```powershell
-python -m unittest discover -s tests -p "test_request_failures.py" -v
-```
-
-Live profiles are operational measurements rather than normal CI tests:
-external websites and network conditions can change between runs.
+The request-failure tests inject retryable and final HTTP failures. Persistence
+tests inject temporary MinIO and MongoDB failures. Load-profiler tests verify
+month selection, Dagster multi-partition tags, cross-run aggregation, exact
+failure-event retention, and instance-concurrency parsing. Live load profiles
+remain operational measurements because the website and local machine load can
+change between runs.
 
 ## Run with Dagster
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 import time
 from datetime import datetime, timezone
 from numbers import Real
@@ -31,6 +32,9 @@ PROFILE_SETTING_NAMES = (
     "STRUCTURED_LOG_PATH",
     "STRUCTURED_LOG_MAX_BYTES",
     "STRUCTURED_LOG_BACKUP_COUNT",
+)
+BODY_PARTITION_STAT = re.compile(
+    r"^body_partition/([^/]+)/(.+)/(found|succeeded|failed|request_failures)$"
 )
 
 
@@ -120,6 +124,19 @@ def build_crawl_profile(
             "errors/pdf_parsing",
             "errors/pdf_empty",
             "errors/content_hash",
+            "errors/document_hashing",
+        )
+    )
+    persistence_errors = sum(
+        _count(stats, key)
+        for key in (
+            "errors/persistence_identity",
+            "errors/minio_connection",
+            "errors/minio_payload",
+            "errors/minio_write",
+            "errors/mongodb_connection",
+            "errors/mongodb_payload",
+            "errors/mongodb_write",
         )
     )
     missing = max(expected - scraped, 0)
@@ -189,6 +206,7 @@ def build_crawl_profile(
             "html_ingested": _count(stats, "documents/html_ingested"),
             "pdf_ingested": _count(stats, "documents/pdf_ingested"),
         },
+        "body_partitions": body_partition_rows(stats),
         "latency_seconds": latency_summary(latencies),
         "retries": {
             "attempts": _count(stats, "retry/count"),
@@ -209,7 +227,41 @@ def build_crawl_profile(
             "dropped_items": dropped,
             "error_counts": _prefixed_counts(stats, "errors/"),
         },
+        "persistence": {
+            "errors": persistence_errors,
+            "retry_attempts": _count(stats, "persistence/retry_attempts"),
+            "retry_recovered": _count(stats, "persistence/retry_recovered"),
+            "retry_exhausted": _count(stats, "persistence/retry_exhausted"),
+            "minio_uploaded": _count(stats, "persistence/minio_uploaded"),
+            "minio_unchanged": _count(stats, "persistence/minio_unchanged"),
+            "mongodb_inserted": _count(stats, "persistence/mongodb_inserted"),
+            "mongodb_updated": _count(stats, "persistence/mongodb_updated"),
+            "mongodb_unchanged": _count(stats, "persistence/mongodb_unchanged"),
+        },
     }
+
+
+def body_partition_rows(stats: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Reconstruct body/month reconciliation rows from Scrapy counters."""
+    rows: dict[tuple[str, str], dict[str, Any]] = {}
+    for key in sorted(stats):
+        match = BODY_PARTITION_STAT.fullmatch(key)
+        if not match:
+            continue
+        partition_date, body, metric = match.groups()
+        row = rows.setdefault(
+            (partition_date, body),
+            {
+                "partition_date": partition_date,
+                "body": body,
+                "found": 0,
+                "succeeded": 0,
+                "failed": 0,
+                "request_failures": 0,
+            },
+        )
+        row[metric] = _count(stats, key)
+    return [rows[key] for key in sorted(rows)]
 
 
 def latency_summary(values: Sequence[float]) -> dict[str, int | float | None]:
