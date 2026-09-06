@@ -278,7 +278,8 @@ document_pipeline_job = define_asset_job(
 )
 def document_pipeline_schedule(context):
     """Launch the latest completed month once for every configured source."""
-    date_key = MONTHLY_PARTITIONS.get_last_partition_key(
+    date_key = MONTHLY_PARTITIONS.get_last_partition_key( # Because it can only run on completed months. I wonder if thats a smart approach.
+    # Maybe it's an edge case: current month documents are skipped
         current_time=context.scheduled_execution_time
     )
     if date_key is None:
