@@ -16,7 +16,7 @@ from kedra_scraper.utils.data_validators import (
 
 @dataclass(frozen=True)
 class BodyCategoryConfig:
-    """One WRC decision body and its search-form value."""
+    """One WRC decision body and its search form value."""
 
     name: str
     form_field: str

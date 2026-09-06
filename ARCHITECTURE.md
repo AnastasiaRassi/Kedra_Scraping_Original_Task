@@ -8,7 +8,7 @@ The pipeline operates on **calendar-month date partitions**. This specific parti
 
 ## Retries and Rate Limiting
 
-We implement robust mechanisms to ensure polite scraping and highly resilient operations at three distinct layers:
+I implemented robust mechanisms to ensure polite scraping and highly resilient operations at three distinct layers:
 
 1. **Rate Limiting**: Scrapy is configured defensively by default to respect external system stability. We utilize `AutoThrottle` to dynamically adjust request delays against website capacity and set strict asynchronous concurrent-request limits per domain (`CONCURRENT_REQUESTS_PER_DOMAIN`) via `config/source_registry.json`.
 2. **Micro-Retries (Scrapy level)**: Scrapy automatically intercepts and handles transient HTTP failures (e.g., 502, 503, 504 gateway timeouts), obeying `SCRAPY_DOWNLOAD_TIMEOUT` and standard scrapy retry parameters without failing the pipeline.

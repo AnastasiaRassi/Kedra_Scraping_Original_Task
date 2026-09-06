@@ -1,3 +1,8 @@
+"""
+This script takes raw files (PDFs and web pages) stored in cloud storage, pulls out all the 
+readable plain text, and saves that text into a database so it can be searched or analyzed.
+"""
+
 from __future__ import annotations
 
 import os

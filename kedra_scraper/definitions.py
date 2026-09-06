@@ -43,8 +43,12 @@ SOURCE_REGISTRY = load_source_registry(
     os.getenv("SOURCE_REGISTRY_PATH", "config/sources.json")
 )
 
-MONTHLY_PARTITIONS = MonthlyPartitionsDefinition(
-    start_date=os.getenv("DAGSTER_PARTITION_START_DATE", "2000-01-01"),
+MONTHLY_PARTITIONS = MonthlyPartitionsDefinition(\
+    # I set the following start date but there is older data to extract too! Since it's less efficient
+    # to look for the odlest present date every dagster run I have a quesiton for Emilio: 
+    # What if older data then the one we've ingested shows up but we hard coded the dagster to 
+    # look at the oldest we saw? But this is naturally unlikely.. 
+    start_date=os.getenv("DAGSTER_PARTITION_START_DATE", "2000-01-01"), 
     end_date=os.getenv("DAGSTER_PARTITION_END_DATE") or None,
     timezone=os.getenv("DAGSTER_PARTITION_TIMEZONE", "Europe/Dublin"),
     end_offset=env_int("DAGSTER_PARTITION_END_OFFSET", 0),

@@ -36,8 +36,9 @@ class WRC_IE_Spider(scrapy.Spider):
 
     @classmethod
     def update_settings(cls, settings) -> None:
-        """Load WRC overrides while preserving higher-priority CLI settings."""
         super().update_settings(settings)
+        # if there are predefined spider settings, which there are in the config, 
+        # they will override here  based on the source key like wrc
         apply_source_settings(settings, cls.source_key)
 
     def __init__(
@@ -292,8 +293,9 @@ class WRC_IE_Spider(scrapy.Spider):
                 },
             )
             return
-
+ 
         if self.scrape_mode == "ingestion":
+            # since dagster has 2 split tasks, the first would end here
             self.crawler.stats.inc_value("documents/html_ingested")
             yield KedraRawDocumentItem(
                 title=title,
@@ -310,6 +312,8 @@ class WRC_IE_Spider(scrapy.Spider):
             )
             return
 
+        # this continuation is proceeded to by the CLI trigger. This isn't perfectly ideal
+        # But I've kept it for now
         try:
             content_node = None
             for selector in self.source_config.selectors.html_content:
@@ -669,11 +673,14 @@ class WRC_IE_Spider(scrapy.Spider):
 
     @staticmethod
     def _add_months(value: date, months: int) -> date:
+        """ Jumps forward by a specified number of months and resets the date to the 1st. """
         month_index = value.year * 12 + value.month - 1 + months
         return date(month_index // 12, month_index % 12 + 1, 1)
 
     @classmethod
     def _selector_text(cls, selector) -> str:
+        """ helper method used to safely extract all the readable text from an HTML element,
+         while stripping away any inner HTML tags and messy whitespace. """
         if selector is None:
             return ""
         return cls._clean_text(" ".join(selector.xpath(".//text()").getall()))

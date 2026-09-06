@@ -95,8 +95,9 @@ def record_body_metric(
     metric: str,
     count: int = 1,
 ) -> None:
-    """Increment one body/month reconciliation metric. Note: In data engineering and web scraping, 
-    reconciliation ensures that what you expect to scrape matches what you actually process and store."""
+    """Increment one body (category on WRC website is called Body) /month reconciliation metric.
+    Note: In data engineering and web scraping, reconciliation ensures that what you expect to 
+    scrape matches what you actually process and store."""
 
     if metric not in _BODY_METRICS:
         raise ValueError(f"Unsupported body metric: {metric}")
