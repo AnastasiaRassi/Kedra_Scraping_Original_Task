@@ -326,8 +326,8 @@ The launcher copies the tracked `config/dagster.yaml` into
 `$DAGSTER_HOME/dagster.yaml`, then starts the webserver from the repository
 root so Dagster also loads `.env`. The instance file directly sets the
 maximum number of simultaneous partition runs. The `DAGSTER_*` application
-variables remain in `.env` because `kedra_scraper/definitions.py` reads
-them directly.
+variables remain in `.env` because `kedra_scraper/definitions.py` and
+`kedra_scraper/utils/dagster_utils.py` read them directly.
 
 Open `http://127.0.0.1:3000`. Select the `document_pipeline_job`, choose a
 `source`/`date` partition, and materialise it. Dagster enforces
