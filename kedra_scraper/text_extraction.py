@@ -23,7 +23,8 @@ def scrape_partition(
     source_config: SourceRegistryEntry,
     partition_date: str,
 ) -> dict[str, int]:
-    """Extract one source/month from raw MinIO blobs into MongoDB text."""
+    """This function handles the text extraction phase for a single source/month partition. It fetches
+     raw binary files from MinIO, extracts their plain text, and updates their records in MongoDB."""
     
     mongo_uri = _required_env("MONGO_URI")
     database_name = _required_env("MONGO_DATABASE")

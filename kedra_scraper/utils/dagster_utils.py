@@ -39,7 +39,8 @@ def partition_context(
     context: AssetExecutionContext,
     monthly_partitions_def: Any,
 ) -> tuple[SourceRegistryEntry, str, date, date]:
-    """Extract source configuration and partition dates from Dagster AssetExecutionContext."""
+    """ This helper function extracts and validates the partition parameters (source and date) for the 
+    current Dagster asset execution run."""
     partition_key = context.partition_key
     if not isinstance(partition_key, MultiPartitionKey):
         raise Failure(
@@ -110,7 +111,12 @@ def run_scrapy(
     *,
     timeout_seconds: float,
 ) -> subprocess.CompletedProcess[str]:
-    """Execute Scrapy in a subprocess, handling timeouts, exit codes, and retries."""
+    """Execute a Scrapy subprocess in the project root, capturing output and enforcing timeouts.
+
+    Runs the specified CLI command ( like python -m scrapy crawl <spider) with full environment 
+    inheritance. Catches process timeouts and non-zero exit codes, logs stdout/stderr tails to the 
+    Dagster context, and raises a retryable Dagster Failure.
+    """
     try:
         result = subprocess.run(
             command,

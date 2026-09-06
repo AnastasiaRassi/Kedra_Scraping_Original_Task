@@ -43,17 +43,19 @@ SOURCE_REGISTRY = load_source_registry(
     os.getenv("SOURCE_REGISTRY_PATH", "config/sources.json")
 )
 
-MONTHLY_PARTITIONS = MonthlyPartitionsDefinition(\
-    # I set the following start date but there is older data to extract too! Since it's less efficient
-    # to look for the odlest present date every dagster run I have a quesiton for Emilio: 
-    # What if older data then the one we've ingested shows up but we hard coded the dagster to 
-    # look at the oldest we saw? But this is naturally unlikely.. 
-    start_date=os.getenv("DAGSTER_PARTITION_START_DATE", "2000-01-01"), 
+# (Ask Emilio)
+# Hardcoding the start date defaults to 2000-01-01 to avoid checking oldest available0 Website
+# documents on every run. If historical data older than our start date appears unexpectedly, 
+# standard static partitions won't catch it. Do we use Dagster Dynamic Partitions & Sensors 
+# or is the edge case too unlikely
+MONTHLY_PARTITIONS = MonthlyPartitionsDefinition(
+    start_date=os.getenv("DAGSTER_PARTITION_START_DATE", "2000-01-01"),
     end_date=os.getenv("DAGSTER_PARTITION_END_DATE") or None,
     timezone=os.getenv("DAGSTER_PARTITION_TIMEZONE", "Europe/Dublin"),
     end_offset=env_int("DAGSTER_PARTITION_END_OFFSET", 0),
 )
 
+# Because we choose both dates & sources as we partition: 
 SOURCE_MONTH_PARTITIONS = MultiPartitionsDefinition(
     {
         "date": MONTHLY_PARTITIONS,
@@ -93,6 +95,8 @@ def raw_documents(context: AssetExecutionContext) -> MaterializeResult:
 
     with tempfile.TemporaryDirectory(prefix="kedra-ingestion-") as directory:
         summary_path = Path(directory) / "crawl-summary.json"
+        # the following defines the command which we would run by terminal to dictate start, end dates 
+        # and scrape mode etc ... 
         command = [
             sys.executable,
             "-m",
@@ -128,8 +132,8 @@ def raw_documents(context: AssetExecutionContext) -> MaterializeResult:
         context.log.info("Scrapy JSON log: %s", structured_log_path)
         context.log.info("Scrapy crawl profile: %s", crawl_profile_path)
         result = run_scrapy(
-            context,
-            command,
+            context, # to stream errors here 
+            command, # to run the command
             timeout_seconds=timeout_seconds,
         )
         summary = read_summary(summary_path)
@@ -258,9 +262,9 @@ def scraped_documents(context: AssetExecutionContext) -> MaterializeResult:
 
 
 document_pipeline_job = define_asset_job(
-    name="document_pipeline_job",
-    selection=AssetSelection.assets(raw_documents, scraped_documents),
-    partitions_def=SOURCE_MONTH_PARTITIONS,
+    name="document_pipeline_job", # Name of the pipeline in the Dagster U
+    selection=AssetSelection.assets(raw_documents, scraped_documents),  #Tells Dagster to run both raw_documents (downloading) and scraped_documents (text parsing) in sequence.
+    partitions_def=SOURCE_MONTH_PARTITIONS, # Applies the 2D grid (source + month) so I can run or backfill this job for one specific source and month at a time.
 )
 
 
@@ -269,7 +273,7 @@ document_pipeline_job = define_asset_job(
     cron_schedule=os.getenv("DAGSTER_SCHEDULE_CRON", "0 2 1 * *"),
     execution_timezone=os.getenv(
         "DAGSTER_PARTITION_TIMEZONE",
-        "Europe/Dublin",
+        "Asia/Beirut",
     ),
 )
 def document_pipeline_schedule(context):
@@ -287,6 +291,7 @@ def document_pipeline_schedule(context):
                 {"date": date_key, "source": source_key}
             ),
         )
+        # launches automated run for all sources
         for source_key in sorted(SOURCE_REGISTRY)
     ]
 
