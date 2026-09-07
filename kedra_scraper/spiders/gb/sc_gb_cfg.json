@@ -22,9 +22,22 @@
     "title": ".//div[contains(@class, 'parsed-content')]/a/text()",
     "identifier": ".//div[contains(@class, 'inline-flex')][contains(text(), '[')]/text()",
     "case_reference": ".//div[contains(@class, 'inline-flex')][contains(text(), 'UKSC/')]/text()",
-    "description": ".//p[contains(@class, 'parsed-content')]/text()"
+    "description": ".//p[contains(@class, 'parsed-content')]/text()",
+    "pdf_download": "//*[@id='judgment-pdf']/@href",
+    "judgment_details_link": "//*[@id='judgment-details-link']/@href",
+    "html_content": [
+      "//h3[@id='judgment-details']/following-sibling::p"
+    ]
   },
   "metadata_selectors": {
-    "linked_case_href": ".//div[contains(@class, 'mt-2')]//div[contains(@class, 'parsed-content')]/a/@href"
+    "linked_case_href": ".//div[contains(@class, 'mt-2')]//div[contains(@class, 'parsed-content')]/a/@href",
+    "case_id": "//p[@id='case-id']",
+    "neutral_citation": "//p[@id='neutral-citation-number']",
+    "judgment_date": "//p[@id='judgment-date']",
+    "appellants": "//p[starts-with(@id, 'appellant-')]",
+    "respondents": "//p[starts-with(@id, 'respondent-')]",
+    "justices": "//h3[@id='justices']/following-sibling::div[1]/div",
+    "hearing_start_dates": "//p[@id='hearing-start-date']",
+    "hearing_end_dates": "//p[@id='hearing-end-date']"
   }
 }

@@ -11,6 +11,16 @@ class UKSCSelectors:
     case_reference: str = ".//div[contains(@class, 'inline-flex')][contains(text(), 'UKSC/')]/text()"
     description: str = "p.parsed-content::text"
     next_page: str = "a[aria-label='Next page']::attr(href)"
+    # Not yet configured/verified against the live site; referenced by
+    # sc_gb_spider.py so they must exist to avoid AttributeError.
+    published_date: str = ""
+    pdf_download: str = ""
+    # Judgment body is a flat run of <p> siblings after the heading, not a
+    # wrapper element.
+    html_content: tuple[str, ...] = ()
+    # Href to a same-domain "Judgment (HTML version)" page, present only on
+    # some cases; older cases only link off-site to BAILII instead.
+    judgment_details_link: str = ""
 
 @dataclass(frozen=True)
 class UKSCQueryParams:
@@ -40,8 +50,11 @@ def load_uksc_source_config(config_path: str) -> UKSCSourceConfig:
     with open(config_path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
 
-    selectors_data = data.get("selectors", {})
+    selectors_data = dict(data.get("selectors", {}))
     query_params_data = data.get("query_params", {})
+
+    if "html_content" in selectors_data:
+        selectors_data["html_content"] = tuple(selectors_data["html_content"])
 
     return UKSCSourceConfig(
         source=data.get("source", "uksc_gb"),
