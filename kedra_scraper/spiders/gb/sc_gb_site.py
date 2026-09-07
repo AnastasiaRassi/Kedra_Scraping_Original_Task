@@ -1,6 +1,10 @@
 from dataclasses import dataclass, field
 import yaml
 
+# Note! : 
+# the judgment_details_link key in the JSON is the url that sends us to grab the text,
+# which is to be parsed using html_content key
+
 @dataclass(frozen=True)
 class UKSCSelectors:
     results_container: str = "//*[@id='search-and-filters-cases']"
