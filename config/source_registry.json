@@ -12,17 +12,17 @@
       },
       "site_config_setting": "WRC_CONFIG_PATH"
     },
-      "sc_uk": {
-      "spider": "SC_UK",
-      "source": "https://supremecourt.uk",
+      "sc_gb": {
+      "spider": "SC_GB",
+      "source": "https://supremecourt.gb",
       "spider_settings": {
-        "SC_UK_CONFIG_PATH": "config/sc_uk.json",
+        "SC_GB_CONFIG_PATH": "config/sc_gb.json",
         "CONCURRENT_REQUESTS_PER_DOMAIN": "6",
         "DOWNLOAD_DELAY": "0.1",
         "AUTOTHROTTLE_ENABLED": "true",
         "AUTOTHROTTLE_TARGET_CONCURRENCY": "3.0"
       },
-      "site_config_setting": "SC_UK_CONFIG_PATH"
+      "site_config_setting": "SC_GB_CONFIG_PATH"
     }
   }
 }

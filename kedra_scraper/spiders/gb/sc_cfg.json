@@ -1,0 +1,26 @@
+{
+  "source": "uksc_gb",
+  "search_url": "https://www.supremecourt.uk/cases/index.html",
+  "request_type": "GET",
+  "query_params": {
+    "from_param": "doisd",
+    "to_param": "doied",
+    "date_format": "%Y-%m-%d",
+    "page_param": "p",
+    "default_params": {
+      "cs": "Judgment given"
+    }
+  },
+  "allowed_domains": [
+    "supremecourt.uk",
+    "www.supremecourt.uk"
+  ],
+  "selectors": {
+    "results_container": "//*[@id='cases-list']",
+    "result_card": "//*[@id='cases-list']//tbody/tr",
+    "document_link": ".//td[contains(@class, 'title')]//a/@href",
+    "identifier": ".//td[contains(@class, 'citation')]/text()",
+    "published_date": ".//td[contains(@class, 'date')]/text()",
+    "description": ".//td[contains(@class, 'summary')]/text()"
+  }
+}
