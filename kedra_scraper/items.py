@@ -1,8 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-import scrapy
-
 @dataclass(kw_only=True)
 class KedraRawDocumentItem:
     title: str
@@ -16,8 +14,8 @@ class KedraRawDocumentItem:
     landing_url: str
     raw_content: bytes = field(repr=False)
     description: str | None = None
+    # e.g. {"case_reference": "UKSC/2009/0136", "subject": "COURT PROCEDURE"}
     source_metadata: dict[str, Any] = field(default_factory=dict)
-    metadata = scrapy.Field()  # e.g. {"case_reference": "UKSC/2009/0136", "subject": "COURT PROCEDURE"}
 
 @dataclass(kw_only=True)
 class KedraExtractedDocumentItem(KedraRawDocumentItem):
