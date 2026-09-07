@@ -5,7 +5,6 @@ from dataclasses import dataclass
 
 from kedra_scraper.utils.data_validators import (
     mapping,
-    non_empty_string,
     optional_string,
     resolve_project_path,
     string_dict,

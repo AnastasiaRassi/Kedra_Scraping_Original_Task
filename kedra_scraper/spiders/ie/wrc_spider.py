@@ -10,7 +10,7 @@ import scrapy
 from pypdf import PdfReader
 
 from kedra_scraper.source_registry import apply_source_settings
-from kedra_scraper.spiders.wrc_ie_site import (
+from kedra_scraper.spiders.ie.wrc_ie_site import (
     WRCSourceConfig,
     load_wrc_source_config,
 )

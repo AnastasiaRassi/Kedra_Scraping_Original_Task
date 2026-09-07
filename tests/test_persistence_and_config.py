@@ -11,7 +11,7 @@ from kedra_scraper.source_registry import (
     apply_source_settings,
     load_source_registry,
 )
-from kedra_scraper.spiders.wrc_ie_site import load_wrc_source_config
+from kedra_scraper.spiders.ireland.wrc_ie_site import load_wrc_source_config
 
 try:
     from kedra_scraper.pipelines import (

@@ -19,7 +19,12 @@ SOURCE_REGISTRY_PATH = os.getenv(
     "SOURCE_REGISTRY_PATH",
     DEFAULT_SOURCE_REGISTRY_PATH,
 )
+
+# this should later be dropped. we wont look for it in .env but do config path +spider name.json
 WRC_CONFIG_PATH = os.getenv("WRC_CONFIG_PATH", "config/wrc_ie.json")
+SC_UK_CONFIG_PATH = os.getenv("SC_UK_CONFIG_PATH", "config/sc_uk.json")
+
+
 SCRAPE_START_DATE = os.getenv("SCRAPE_START_DATE")
 SCRAPE_END_DATE = os.getenv("SCRAPE_END_DATE")
 SCRAPE_PARTITION_MONTHS = env_int(
