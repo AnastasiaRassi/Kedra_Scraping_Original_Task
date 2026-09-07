@@ -21,7 +21,10 @@ from dagster import (
 )
 from dotenv import load_dotenv
 
-from kedra_scraper.source_registry import load_source_registry
+from kedra_scraper.source_registry import (
+    DEFAULT_SOURCE_REGISTRY_PATH,
+    load_source_registry,
+)
 from kedra_scraper.text_extraction import scrape_partition
 from kedra_scraper.utils import env_bool, env_float, env_int, write_crawl_summary
 from kedra_scraper.utils.dagster_utils import (
@@ -40,7 +43,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
 SOURCE_REGISTRY = load_source_registry(
-    os.getenv("SOURCE_REGISTRY_PATH", "config/sources.json")
+    os.getenv("SOURCE_REGISTRY_PATH", DEFAULT_SOURCE_REGISTRY_PATH)
 )
 
 # (Ask Emilio)
