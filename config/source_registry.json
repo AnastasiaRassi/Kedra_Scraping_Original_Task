@@ -4,25 +4,25 @@
       "spider": "WRC_IE",
       "source": "https://www.workplacerelations.ie",
       "spider_settings": {
-        "WRC_CONFIG_PATH": "config/wrc_ie.json",
+        "SITE_CONFIG_PATH": "kedra_scraper/spiders/ie/wrc_cfg.json",
         "CONCURRENT_REQUESTS_PER_DOMAIN": "6",
         "DOWNLOAD_DELAY": "0.1",
         "AUTOTHROTTLE_ENABLED": "true",
         "AUTOTHROTTLE_TARGET_CONCURRENCY": "3.0"
       },
-      "site_config_setting": "WRC_CONFIG_PATH"
+      "site_config_setting": "SITE_CONFIG_PATH"
     },
     "uksc_gb": {
       "spider": "UKSC_GB",
       "source": "https://www.supremecourt.uk",
       "spider_settings": {
-        "SC_GB_CONFIG_PATH": "config/sc_gb.json",
+        "SITE_CONFIG_PATH": "kedra_scraper/spiders/gb/sc_gb_cfg.json",
         "CONCURRENT_REQUESTS_PER_DOMAIN": "6",
         "DOWNLOAD_DELAY": "0.1",
         "AUTOTHROTTLE_ENABLED": "true",
         "AUTOTHROTTLE_TARGET_CONCURRENCY": "3.0"
       },
-      "site_config_setting": "SC_GB_CONFIG_PATH"
+      "site_config_setting": "SITE_CONFIG_PATH"
     }
   }
 }

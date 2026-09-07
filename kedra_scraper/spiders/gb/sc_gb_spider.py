@@ -14,7 +14,7 @@ from kedra_scraper.items import (
     KedraRawDocumentItem,
 )
 from kedra_scraper.source_registry import apply_source_settings
-from kedra_scraper.spiders.gb.sc_uk_site import (
+from kedra_scraper.spiders.gb.sc_gb_site import (
     UKSCSourceConfig,
     load_uksc_source_config,
 )
@@ -58,9 +58,9 @@ class UKSC_GB_Spider(scrapy.Spider):
 
     def _configure(self, settings) -> None:
         """Load UKSC source configuration and runtime parameters."""
-        config_path = settings.get("UKSC_CONFIG_PATH") or settings.get("WRC_CONFIG_PATH")
+        config_path = settings.get("SITE_CONFIG_PATH")
         if not config_path:
-            raise ValueError("UKSC_CONFIG_PATH must not be empty")
+            raise ValueError("SITE_CONFIG_PATH must not be empty")
 
         self.source_config: UKSCSourceConfig = load_uksc_source_config(config_path)
         self.allowed_domains = list(self.source_config.allowed_domains)

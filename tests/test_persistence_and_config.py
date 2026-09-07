@@ -11,7 +11,7 @@ from kedra_scraper.source_registry import (
     apply_source_settings,
     load_source_registry,
 )
-from kedra_scraper.spiders.ireland.wrc_ie_site import load_wrc_source_config
+from kedra_scraper.spiders.ie.wrc_ie_site import load_wrc_source_config
 
 try:
     from kedra_scraper.pipelines import (
@@ -428,7 +428,7 @@ class PersistenceUpsertTests(unittest.TestCase):
 
 class SiteConfigTests(unittest.TestCase):
     def test_wrc_config_loads_typed_runtime_values(self) -> None:
-        config = load_wrc_source_config("config/wrc_ie.json")
+        config = load_wrc_source_config("kedra_scraper/spiders/ie/wrc_cfg.json")
 
         self.assertEqual(config.source, "https://www.workplacerelations.ie")
         self.assertIsInstance(config.allowed_domains, tuple)

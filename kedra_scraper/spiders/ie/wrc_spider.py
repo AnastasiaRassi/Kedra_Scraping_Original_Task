@@ -60,9 +60,9 @@ class WRC_IE_Spider(scrapy.Spider):
 
     def _configure(self, settings) -> None:
         """Load source rules and runtime parameters before crawling."""
-        config_path = settings.get("WRC_CONFIG_PATH")
+        config_path = settings.get("SITE_CONFIG_PATH")
         if not config_path:
-            raise ValueError("WRC_CONFIG_PATH must not be empty")
+            raise ValueError("SITE_CONFIG_PATH must not be empty")
 
         self.source_config: WRCSourceConfig = load_wrc_source_config(
             config_path

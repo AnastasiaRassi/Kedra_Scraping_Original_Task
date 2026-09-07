@@ -97,10 +97,12 @@ Configuration is intentionally split by scope:
 
 - `.env` contains application runtime values read by the Python assets,
   spiders, persistence clients, and Docker Compose.
-- `config/source_registry.json` contains per-source spider selection and benchmarked
-  request-rate overrides.
-- Each website configuration file, currently `config/wrc_ie.json`, contains that
-  site's selectors and form details.
+- `config/source_registry.json` contains per-source spider selection, benchmarked
+  request-rate overrides, and the path to each site's own config file
+  (`SITE_CONFIG_PATH`).
+- Each site's own config file, named after its spider (e.g.
+  `kedra_scraper/spiders/ie/wrc_cfg.json`), contains that site's selectors and
+  form details.
 - `config/dagster.yaml` contains Dagster instance behavior that applies across
   runs, currently the maximum number of simultaneously active partition runs.
 
@@ -116,7 +118,7 @@ source. No local credentials belong in source code.
 | MinIO | `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `MINIO_SECURE`, `MINIO_BUCKET`, `MINIO_PREFIX` |
 | Docker | Image, container, bind-host, port, credential, and data-path variables in `.env.example` |
 | Direct crawl period | `SCRAPE_START_DATE`, `SCRAPE_END_DATE`, `SCRAPE_PARTITION_MONTHS` |
-| Source rules | `WRC_CONFIG_PATH`, `SOURCE_REGISTRY_PATH` |
+| Source rules | `SOURCE_REGISTRY_PATH` (per-source `SITE_CONFIG_PATH` lives in the registry, not `.env`) |
 | Request behavior | `SCRAPY_ROBOTSTXT_OBEY`, `SCRAPY_COOKIES_ENABLED`, `SCRAPY_DOWNLOAD_TIMEOUT`, `SCRAPY_RETRY_TIMES` |
 | Structured logs | `SCRAPY_LOG_DIR`, `SCRAPY_STRUCTURED_LOG_PATH`, `SCRAPY_LOG_MAX_BYTES`, `SCRAPY_LOG_BACKUP_COUNT` |
 | Concurrency | `SCRAPY_CONCURRENT_REQUESTS`, `SCRAPY_CONCURRENT_REQUESTS_PER_DOMAIN`, `SCRAPY_DOWNLOAD_DELAY` |
@@ -145,13 +147,13 @@ All supported variables and development defaults are listed in
       "spider": "WRC_IE",
       "source": "https://www.workplacerelations.ie",
       "spider_settings": {
-        "WRC_CONFIG_PATH": "config/wrc_ie.json",
+        "SITE_CONFIG_PATH": "kedra_scraper/spiders/ie/wrc_cfg.json",
         "CONCURRENT_REQUESTS_PER_DOMAIN": "6",
         "DOWNLOAD_DELAY": "0.1",
         "AUTOTHROTTLE_ENABLED": "true",
         "AUTOTHROTTLE_TARGET_CONCURRENCY": "3.0"
       },
-      "site_config_setting": "WRC_CONFIG_PATH"
+      "site_config_setting": "SITE_CONFIG_PATH"
     }
   }
 }
