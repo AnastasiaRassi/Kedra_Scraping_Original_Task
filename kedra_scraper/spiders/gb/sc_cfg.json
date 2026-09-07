@@ -16,11 +16,12 @@
     "www.supremecourt.uk"
   ],
   "selectors": {
-    "results_container": "//*[@id='cases-list']",
-    "result_card": "//*[@id='cases-list']//tbody/tr",
-    "document_link": ".//td[contains(@class, 'title')]//a/@href",
-    "identifier": ".//td[contains(@class, 'citation')]/text()",
-    "published_date": ".//td[contains(@class, 'date')]/text()",
-    "description": ".//td[contains(@class, 'summary')]/text()"
+    "results_container": "//*[@id='search-and-filters-cases']",
+    "result_card": "//*[@id='search-and-filters-cases']//ul/li",
+    "document_link": ".//div[contains(@class, 'parsed-content')]/a/@href",
+    "title": ".//div[contains(@class, 'parsed-content')]/a/text()",
+    "identifier": ".//div[contains(@class, 'inline-flex')][contains(text(), '[')]/text()",
+    "case_reference": ".//div[contains(@class, 'inline-flex')][contains(text(), 'UKSC/')]/text()",
+    "description": ".//p[contains(@class, 'parsed-content')]/text()"
   }
 }
