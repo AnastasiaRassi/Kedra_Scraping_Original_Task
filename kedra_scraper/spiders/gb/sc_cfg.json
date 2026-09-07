@@ -23,5 +23,8 @@
     "identifier": ".//div[contains(@class, 'inline-flex')][contains(text(), '[')]/text()",
     "case_reference": ".//div[contains(@class, 'inline-flex')][contains(text(), 'UKSC/')]/text()",
     "description": ".//p[contains(@class, 'parsed-content')]/text()"
+  },
+  "metadata_selectors": {
+    "linked_case_href": ".//div[contains(@class, 'mt-2')]//div[contains(@class, 'parsed-content')]/a/@href"
   }
 }

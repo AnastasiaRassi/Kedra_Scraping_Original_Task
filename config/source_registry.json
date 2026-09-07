@@ -12,9 +12,9 @@
       },
       "site_config_setting": "WRC_CONFIG_PATH"
     },
-      "sc_gb": {
-      "spider": "SC_GB",
-      "source": "https://supremecourt.gb",
+    "uksc_gb": {
+      "spider": "UKSC_GB",
+      "source": "https://www.supremecourt.uk",
       "spider_settings": {
         "SC_GB_CONFIG_PATH": "config/sc_gb.json",
         "CONCURRENT_REQUESTS_PER_DOMAIN": "6",
