@@ -178,16 +178,25 @@ def _run_storage_operation(
 
 
 def _build_record_key(document: dict) -> str:
-    """Build a stable identity independent of nullable source identifiers."""
+    """Build a stable identity independent of nullable source identifiers.
+
+    source_format is part of the identity: a source that publishes both an
+    HTML and a PDF version of one document (e.g. a UKSC judgment) persists
+    them as two records sharing the same landing_url, not one record whose
+    blob keeps getting overwritten.
+    """
     source = document.get("source")
     landing_url = document.get("landing_url")
+    source_format = document.get("source_format")
 
     if not isinstance(source, str) or not source.strip():
         raise ValueError("source is required to build record_key")
     if not isinstance(landing_url, str) or not landing_url.strip():
         raise ValueError("landing_url is required to build record_key")
+    if not isinstance(source_format, str) or not source_format.strip():
+        raise ValueError("source_format is required to build record_key")
 
-    identity = f"{source.rstrip('/')}|{landing_url.strip()}"
+    identity = f"{source.rstrip('/')}|{landing_url.strip()}|{source_format.strip()}"
     return hash_document(identity)
 
 
@@ -243,8 +252,10 @@ def _metadata_blob_hash(stat_result) -> str | None:
 class MinioPipeline:
     """Upsert one current raw object per logical source document.
 
-    ``record_key`` identifies the document from its source and landing URL, so
-    it remains stable when that document's bytes change. The content SHA-256 is
+    ``record_key`` identifies the document from its source, landing URL, and
+    format, so it remains stable when that document's bytes change while still
+    letting one landing URL persist as separate HTML and PDF records. The
+    content SHA-256 is
     used only to detect whether those bytes changed. It is deliberately not
     included in the MinIO key: a hash-based key would create another object
     for every replacement instead of overwriting the older object, retaining
