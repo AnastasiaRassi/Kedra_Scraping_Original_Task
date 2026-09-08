@@ -177,8 +177,9 @@ The Dagster assets do not need website-specific branches.
 
 ## Run a direct Scrapy test
 
-Direct crawls default to `SCRAPE_MODE=full`: the spider downloads each file,
-extracts its text, and yields a complete `KedraScraperItem` in one run.
+A direct crawl only ingests: the spider downloads each file and yields a
+`KedraRawDocumentItem` with the raw bytes. Text extraction always happens
+separately, in the `scraped_documents` Dagster asset (see below).
 
 The WRC spider accepts `DD-MM-YYYY` or `YYYY-MM-DD` dates. It
 automatically loads the `wrc_ie` request-rate overrides from the source
@@ -339,9 +340,9 @@ The included schedule launches the latest completed month for every source in
 the registry. Its cron expression and timezone come from `.env`; enable the
 schedule in the Dagster UI when ready.
 
-Dagster always forces the spider subprocess to `SCRAPE_MODE=ingestion`, so text
-extraction happens in the separate `scraped_documents` asset rather than in
-the spider subprocess.
+The spider subprocess only ever ingests raw bytes; text extraction always
+happens in the separate `scraped_documents` asset rather than in the spider
+subprocess.
 
 ## Partitioning
 
