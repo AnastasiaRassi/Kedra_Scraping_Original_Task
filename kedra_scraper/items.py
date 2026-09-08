@@ -16,8 +16,3 @@ class KedraRawDocumentItem:
     description: str | None = None
     # e.g. {"case_reference": "UKSC/2009/0136", "subject": "COURT PROCEDURE"}
     source_metadata: dict[str, Any] = field(default_factory=dict)
-
-@dataclass(kw_only=True)
-class KedraExtractedDocumentItem(KedraRawDocumentItem):
-    content: str
-    content_hash: str

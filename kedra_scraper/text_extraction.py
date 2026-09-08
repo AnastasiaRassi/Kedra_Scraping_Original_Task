@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from io import BytesIO
 from typing import Any
 
+from cssselect.parser import SelectorSyntaxError
 from minio import Minio
 from pypdf import PdfReader
 from pymongo import MongoClient
@@ -162,11 +163,26 @@ def _extract_content(
             type="html",
         )
         content = ""
-        for css_selector in html_content_selectors:
-            nodes = selector.css(css_selector)
+        for query in html_content_selectors:
+            try:
+                nodes = selector.css(query)
+            except SelectorSyntaxError:
+                # Some sources' selectors are XPath, not CSS.
+                nodes = selector.xpath(query)
             if nodes:
-                content = _clean_text(
-                    " ".join(nodes.xpath(".//text()").getall())
+                # Joined per-node, not across the whole match: a selector
+                # matching one wrapper container collapses to one string as
+                # before, but a selector matching many sibling paragraphs
+                # (e.g. UKSC judgments) keeps paragraph breaks instead of
+                # losing them to one flattened line.
+                content = "\n\n".join(
+                    part
+                    for node in nodes
+                    if (
+                        part := _clean_text(
+                            " ".join(node.xpath(".//text()").getall())
+                        )
+                    )
                 )
                 if content:
                     break

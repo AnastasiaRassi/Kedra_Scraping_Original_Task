@@ -2,22 +2,17 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime, timedelta
-from io import BytesIO
 from typing import Iterator
 from urllib.parse import urlencode, urlsplit
 
 import scrapy
-from pypdf import PdfReader
 
 from kedra_scraper.source_registry import apply_source_settings
 from kedra_scraper.spiders.ie.wrc_ie_site import (
     WRCSourceConfig,
     load_wrc_source_config,
 )
-from kedra_scraper.items import (
-    KedraExtractedDocumentItem,
-    KedraRawDocumentItem,
-)
+from kedra_scraper.items import KedraRawDocumentItem
 from kedra_scraper.utils.structured_logging import (
     body_partition_summaries,
     log_structured,
@@ -25,7 +20,6 @@ from kedra_scraper.utils.structured_logging import (
 )
 from kedra_scraper.utils import (
     handle_request_error as record_request_error,
-    hash_document,
     write_crawl_summary,
 )
 
@@ -71,13 +65,9 @@ class WRC_IE_Spider(scrapy.Spider):
         self.search_url = self.source_config.search_url
         self.source = self.source_config.source
         self.partition_months = settings.getint("SCRAPE_PARTITION_MONTHS")
-        self.scrape_mode = settings.get("SCRAPE_MODE") # Dagster splits the tasks but the  CLI run keeps
-        # them coupled which is why this toggle matters
 
         if self.partition_months < 1:
             raise ValueError("SCRAPE_PARTITION_MONTHS must be at least 1")
-        if self.scrape_mode not in {"full", "ingestion"}:
-            raise ValueError("SCRAPE_MODE must be either 'full' or 'ingestion'")
 
         start_value = (
             self._start_date_argument or settings.get("SCRAPE_START_DATE")
@@ -293,81 +283,12 @@ class WRC_IE_Spider(scrapy.Spider):
                 },
             )
             return
- 
-        if self.scrape_mode == "ingestion":
-            # since dagster has 2 split tasks, the first would end here
-            self.crawler.stats.inc_value("documents/html_ingested")
-            yield KedraRawDocumentItem(
-                title=title,
-                published_date=published_date,
-                partition_date=partition_date,
-                identifier=identifier,
-                source=self.source,
-                category=category,
-                source_format="html",
-                doc_url=response.url,
-                landing_url=landing_url,
-                raw_content=response.body,
-                description=description,
-            )
-            return
 
-        # this continuation is proceeded to by the CLI trigger. This isn't perfectly ideal
-        # But I've kept it for now
-        try:
-            content_node = None
-            for selector in self.source_config.selectors.html_content:
-                selected = response.css(selector)
-                if selected:
-                    content_node = selected
-                    break
-            content = self._selector_text(content_node)
-        except Exception as exc:
-            self.crawler.stats.inc_value("errors/html_parsing")
-            record_body_metric(self, partition_date, category, "failed")
-            log_structured(
-                self.logger,
-                logging.ERROR,
-                "html_extraction_failed",
-                "HTML parsing failed",
-                exc_info=True,
-                partition_date=partition_date,
-                body=category,
-                identifier=identifier,
-                url=response.url,
-                status_code=response.status,
-                error_type=type(exc).__name__,
-                reason=str(exc),
-            )
-            return
-
-        if not content:
-            self.crawler.stats.inc_value("errors/html_empty")
-            record_body_metric(self, partition_date, category, "failed")
-            log_structured(
-                self.logger,
-                logging.WARNING,
-                "html_extraction_failed",
-                "No HTML document content found",
-                partition_date=partition_date,
-                body=category,
-                identifier=identifier,
-                url=response.url,
-                status_code=response.status,
-                error_type="empty_html_content",
-                reason="Configured selectors returned no document text",
-            )
-            return
-
-        content_hash = hash_document(content)
-
-        self.crawler.stats.inc_value("documents/html_extracted")
-        yield KedraExtractedDocumentItem(
+        self.crawler.stats.inc_value("documents/html_ingested")
+        yield KedraRawDocumentItem(
             title=title,
             published_date=published_date,
             partition_date=partition_date,
-            content=content,
-            content_hash=content_hash,
             identifier=identifier,
             source=self.source,
             category=category,
@@ -389,79 +310,12 @@ class WRC_IE_Spider(scrapy.Spider):
         description: str | None,
         landing_url: str,
     ):
-        """Extract text from a PDF document."""
-        if self.scrape_mode == "ingestion":
-            self.crawler.stats.inc_value("documents/pdf_ingested")
-            yield KedraRawDocumentItem(
-                title=title,
-                published_date=published_date,
-                partition_date=partition_date,
-                identifier=identifier,
-                source=self.source,
-                category=category,
-                source_format="pdf",
-                doc_url=response.url,
-                landing_url=landing_url,
-                raw_content=response.body,
-                description=description,
-            )
-            return
-
-        content = ""
-
-        try:
-            reader = PdfReader(BytesIO(response.body))
-            content = "\n\n".join(
-                text
-                for page in reader.pages
-                if (text := (page.extract_text() or "").strip())
-            )
-        except Exception as exc:
-            self.crawler.stats.inc_value("errors/pdf_parsing")
-            record_body_metric(self, partition_date, category, "failed")
-            log_structured(
-                self.logger,
-                logging.ERROR,
-                "pdf_extraction_failed",
-                "PDF parsing failed",
-                exc_info=True,
-                partition_date=partition_date,
-                body=category,
-                identifier=identifier,
-                url=response.url,
-                status_code=response.status,
-                error_type=type(exc).__name__,
-                reason=str(exc),
-            )
-            return
-
-        if not content:
-            self.crawler.stats.inc_value("errors/pdf_empty")
-            record_body_metric(self, partition_date, category, "failed")
-            log_structured(
-                self.logger,
-                logging.WARNING,
-                "pdf_extraction_failed",
-                "No extractable PDF text found",
-                partition_date=partition_date,
-                body=category,
-                identifier=identifier,
-                url=response.url,
-                status_code=response.status,
-                error_type="empty_pdf_content",
-                reason="The PDF may be scanned and require OCR",
-            )
-            return
-
-        content_hash = hash_document(content)
-
-        self.crawler.stats.inc_value("documents/pdf_extracted")
-        yield KedraExtractedDocumentItem(
+        """Store the raw PDF bytes; text extraction happens in the scraped_documents asset."""
+        self.crawler.stats.inc_value("documents/pdf_ingested")
+        yield KedraRawDocumentItem(
             title=title,
             published_date=published_date,
             partition_date=partition_date,
-            content=content,
-            content_hash=content_hash,
             identifier=identifier,
             source=self.source,
             category=category,
@@ -492,21 +346,11 @@ class WRC_IE_Spider(scrapy.Spider):
             "documents/incomplete_result",
             0,
         )
-        extraction_failed = sum(
-            stats.get_value(key, 0)
-            for key in (
-                "errors/html_parsing",
-                "errors/html_empty",
-                "errors/pdf_parsing",
-                "errors/pdf_empty",
-            )
-        )
         dropped = stats.get_value("item_dropped_count", 0)
         missing = max(expected - scraped, 0)
         explained_missing = (
             request_failed
             + incomplete_results
-            + extraction_failed
             + dropped
         )
         unexplained_missing = max(missing - explained_missing, 0)
@@ -528,7 +372,6 @@ class WRC_IE_Spider(scrapy.Spider):
             "scraped": scraped,
             "request_failed": request_failed,
             "search_request_failed": search_request_failed,
-            "extraction_failed": extraction_failed,
             "incomplete_results": incomplete_results,
             "dropped": dropped,
             "missing": missing,
@@ -544,14 +387,6 @@ class WRC_IE_Spider(scrapy.Spider):
             ),
             "persistence_retry_exhausted": stats.get_value(
                 "persistence/retry_exhausted",
-                0,
-            ),
-            "html_extracted": stats.get_value(
-                "documents/html_extracted",
-                0,
-            ),
-            "pdf_extracted": stats.get_value(
-                "documents/pdf_extracted",
                 0,
             ),
             "html_ingested": stats.get_value(

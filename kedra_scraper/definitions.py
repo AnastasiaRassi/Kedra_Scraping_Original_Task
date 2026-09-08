@@ -111,8 +111,6 @@ def raw_documents(context: AssetExecutionContext) -> MaterializeResult:
             "-a",
             f"end_date={end_date:%d-%m-%Y}",
             "-s",
-            "SCRAPE_MODE=ingestion",
-            "-s",
             f"CRAWL_SUMMARY_PATH={summary_path}",
             "-s",
             f"LOG_LEVEL={log_level}",

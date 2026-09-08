@@ -27,9 +27,6 @@ SCRAPE_PARTITION_MONTHS = env_int(
     1,
     minimum=1,
 )
-SCRAPE_MODE = os.getenv("SCRAPE_MODE", "full").strip().lower()
-if SCRAPE_MODE not in {"full", "ingestion"}:
-    raise ValueError("SCRAPE_MODE must be either 'full' or 'ingestion'")
 CRAWL_SUMMARY_PATH = os.getenv("CRAWL_SUMMARY_PATH")
 CRAWL_PROFILE_PATH = os.getenv("CRAWL_PROFILE_PATH")
 

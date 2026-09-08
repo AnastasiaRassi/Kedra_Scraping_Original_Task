@@ -20,9 +20,8 @@
     "result_card": "//*[@id='search-and-filters-cases']//ul/li",
     "document_link": ".//div[contains(@class, 'parsed-content')]/a/@href",
     "title": ".//div[contains(@class, 'parsed-content')]/a/text()",
-    "identifier": ".//div[contains(@class, 'inline-flex')][contains(text(), '[')]/text()",
-    "case_reference": ".//div[contains(@class, 'inline-flex')][contains(text(), 'UKSC/')]/text()",
-    "description": ".//p[contains(@class, 'parsed-content')]/text()",
+    "identifier": ".//p[contains(@class, 'parsed-content')][starts-with(text(), 'UKSC/')]/text()",
+    "description": ".//span[contains(text(), 'Case summary')]/following-sibling::p[1]/text()",
     "pdf_download": "//*[@id='judgment-pdf']/@href",
     "judgment_details_link": "//*[@id='judgment-details-link']/@href",
     "html_content": [
@@ -30,14 +29,21 @@
     ]
   },
   "metadata_selectors": {
-    "linked_case_href": ".//div[contains(@class, 'mt-2')]//div[contains(@class, 'parsed-content')]/a/@href",
     "case_id": "//p[@id='case-id']",
     "neutral_citation": "//p[@id='neutral-citation-number']",
     "judgment_date": "//p[@id='judgment-date']",
+    "issue": "//p[@id='issue']",
+    "facts": "//p[@id='facts']",
     "appellants": "//p[starts-with(@id, 'appellant-')]",
     "respondents": "//p[starts-with(@id, 'respondent-')]",
-    "justices": "//h3[@id='justices']/following-sibling::div[1]/div",
+    "justices": "(//*[@id='justices'])[1]/following-sibling::div[1]/div",
     "hearing_start_dates": "//p[@id='hearing-start-date']",
-    "hearing_end_dates": "//p[@id='hearing-end-date']"
+    "hearing_end_dates": "//p[@id='hearing-end-date']",
+    "pta_justices": "//*[@id='permission-to-appeal']/following::*[@id='justices'][1]/following-sibling::div[1]/div",
+    "pta_decision_date": "//p[@id='pta-decision-date']",
+    "pta_outcome": "//p[@id='pta-outcome']",
+    "press_summary_url": "//*[@id='press-summary-pdf']/@href",
+    "bailii_url": "//*[@id='judgment-on-bailii-link']/@href",
+    "national_archives_url": "//*[@id='judgment-on-tna-link']/@href"
   }
 }

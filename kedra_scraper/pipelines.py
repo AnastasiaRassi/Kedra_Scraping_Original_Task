@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -196,7 +197,13 @@ def _build_record_key(document: dict) -> str:
     if not isinstance(source_format, str) or not source_format.strip():
         raise ValueError("source_format is required to build record_key")
 
-    identity = f"{source.rstrip('/')}|{landing_url.strip()}|{source_format.strip()}"
+    # JSON-encoded rather than delimiter-joined: a raw "|"-joined string lets
+    # two different (source, landing_url) pairs collide onto the same joined
+    # string (e.g. a stray "|" inside one field). JSON's per-element quoting
+    # keeps field boundaries unambiguous.
+    identity = json.dumps(
+        [source.rstrip("/"), landing_url.strip(), source_format.strip()]
+    )
     return hash_document(identity)
 
 
