@@ -1,73 +1,99 @@
-from dataclasses import dataclass, field
-import yaml
+from __future__ import annotations
 
-# Note! : 
-# the judgment_details_link key in the JSON is the url that sends us to grab the text,
-# which is to be parsed using html_content key
+import json
+from dataclasses import dataclass
+
+from kedra_scraper.utils.data_validators import (
+    mapping,
+    resolve_project_path,
+    string_dict,
+    string_tuple,
+    text,
+)
+
+# Note! :
+# the judgment_html_link selector yields the url that sends us to grab the text,
+# which is to be parsed using the html_content key
+
 
 @dataclass(frozen=True)
 class UKSCSelectors:
-    results_container: str = "//*[@id='search-and-filters-cases']"
-    result_card: str = "#search-and-filters-cases ul > li"
-    document_link: str = "div.parsed-content a::attr(href)"
-    title: str = "div.parsed-content a::text"
-    identifier: str = ".//div[contains(@class, 'inline-flex')][contains(text(), '[')]/text()"
-    case_reference: str = ".//div[contains(@class, 'inline-flex')][contains(text(), 'UKSC/')]/text()"
-    description: str = "p.parsed-content::text"
-    next_page: str = "a[aria-label='Next page']::attr(href)"
-    # Not yet configured/verified against the live site; referenced by
-    # sc_gb_spider.py so they must exist to avoid AttributeError.
-    published_date: str = ""
-    pdf_download: str = ""
-    # Judgment body is a flat run of <p> siblings after the heading, not a
-    # wrapper element.
-    html_content: tuple[str, ...] = ()
-    # Href to a same-domain "Judgment (HTML version)" page, present only on
-    # some cases; older cases only link off-site to BAILII instead.
-    judgment_details_link: str = ""
+    """XPath selectors used to read one UKSC case page."""
 
-@dataclass(frozen=True)
-class UKSCQueryParams:
-    from_param: str = "doisd"
-    to_param: str = "doied"
-    date_format: str = "%Y-%m-%d"
-    page_param: str = "p"
-    default_params: dict[str, str] = field(default_factory=lambda: {"cs": "Judgment given"})
+    case_id: str
+    title: str
+    case_status: str
+    judgment_date: str
+    judgment_pdf: str
+    judgment_html_link: str
+    html_content: tuple[str, ...]
+
 
 @dataclass(frozen=True)
 class UKSCSourceConfig:
-    source: str = "uksc_gb"
-    search_url: str = "https://www.supremecourt.uk/cases/index.html"
-    request_type: str = "GET"
-    allowed_domains: tuple[str, ...] = ("supremecourt.uk", "www.supremecourt.uk")
-    selectors: UKSCSelectors = field(default_factory=UKSCSelectors)
-    query_params: UKSCQueryParams = field(default_factory=UKSCQueryParams)
-    metadata_selectors: dict[str, str] = field(
-        default_factory=lambda: {
-            "linked_case_href": ".//div[contains(@class, 'mt-2')]//div[contains(@class, 'parsed-content')]/a/@href"
-        }
-    )
-    input_date_formats: tuple[str, ...] = ("%Y-%m-%d", "%d/%m/%Y")
-    published_date_formats: tuple[str, ...] = ("%d %B %Y", "%d/%m/%Y", "%Y-%m-%d")
+    """Validated runtime representation of the UKSC site configuration."""
 
-def load_uksc_source_config(config_path: str) -> UKSCSourceConfig:
-    with open(config_path, "r", encoding="utf-8") as f:
-        data = yaml.safe_load(f) or {}
+    source: str
+    sitemap_url: str
+    case_url_pattern: str
+    allowed_domains: tuple[str, ...]
+    selectors: UKSCSelectors
+    metadata_selectors: dict[str, str]
+    metadata_list_selectors: dict[str, str]
+    published_date_formats: tuple[str, ...]
 
-    selectors_data = dict(data.get("selectors", {}))
-    query_params_data = data.get("query_params", {})
 
-    if "html_content" in selectors_data:
-        selectors_data["html_content"] = tuple(selectors_data["html_content"])
+def load_uksc_source_config(value: str) -> UKSCSourceConfig:
+    """Load and validate the source-specific UKSC scraping configuration."""
+    path = resolve_project_path(value)
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise ValueError(f"UKSC config file does not exist: {path}") from exc
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Cannot read UKSC config file {path}: {exc}") from exc
+
+    root = mapping(raw, "UKSC config root")
+    sel_dict = mapping(root.get("selectors"), "selectors")
+    date_dict = mapping(root.get("date_formats"), "date_formats")
+
+    selector_values = {
+        field: text(sel_dict, field, "selectors")
+        for field in (
+            "case_id",
+            "title",
+            "case_status",
+            "judgment_date",
+            "judgment_pdf",
+            "judgment_html_link",
+        )
+    }
 
     return UKSCSourceConfig(
-        source=data.get("source", "uksc_gb"),
-        search_url=data.get("search_url", "https://www.supremecourt.uk/cases/index.html"),
-        request_type=data.get("request_type", "GET"),
-        allowed_domains=tuple(data.get("allowed_domains", ["supremecourt.uk", "www.supremecourt.uk"])),
-        selectors=UKSCSelectors(**selectors_data) if selectors_data else UKSCSelectors(),
-        query_params=UKSCQueryParams(**query_params_data) if query_params_data else UKSCQueryParams(),
-        metadata_selectors=data.get("metadata_selectors", {
-            "linked_case_href": ".//div[contains(@class, 'mt-2')]//div[contains(@class, 'parsed-content')]/a/@href"
-        }),
+        source=text(root, "source", "UKSC config"),
+        sitemap_url=text(root, "sitemap_url", "UKSC config"),
+        case_url_pattern=text(root, "case_url_pattern", "UKSC config"),
+        allowed_domains=string_tuple(
+            root.get("allowed_domains"),
+            "allowed_domains",
+        ),
+        selectors=UKSCSelectors(
+            **selector_values,
+            html_content=string_tuple(
+                sel_dict.get("html_content"),
+                "selectors.html_content",
+            ),
+        ),
+        metadata_selectors=string_dict(
+            root.get("metadata_selectors"),
+            "metadata_selectors",
+        ),
+        metadata_list_selectors=string_dict(
+            root.get("metadata_list_selectors"),
+            "metadata_list_selectors",
+        ),
+        published_date_formats=string_tuple(
+            date_dict.get("published"),
+            "date_formats.published",
+        ),
     )

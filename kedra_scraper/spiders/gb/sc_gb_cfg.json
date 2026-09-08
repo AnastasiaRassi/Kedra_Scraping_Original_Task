@@ -1,49 +1,47 @@
 {
   "source": "uksc_gb",
-  "search_url": "https://www.supremecourt.uk/cases/index.html",
-  "request_type": "GET",
-  "query_params": {
-    "from_param": "doisd",
-    "to_param": "doied",
-    "date_format": "%Y-%m-%d",
-    "page_param": "p",
-    "default_params": {
-      "cs": "Judgment given"
-    }
-  },
+  "sitemap_url": "https://supremecourt.uk/sitemap.xml",
+  "case_url_pattern": "/cases/uksc-\\d{4}-\\d{4}$",
   "allowed_domains": [
     "supremecourt.uk",
     "www.supremecourt.uk"
   ],
   "selectors": {
-    "results_container": "//*[@id='search-and-filters-cases']",
-    "result_card": "//*[@id='search-and-filters-cases']//ul/li",
-    "document_link": ".//div[contains(@class, 'parsed-content')]/a/@href",
-    "title": ".//div[contains(@class, 'parsed-content')]/a/text()",
-    "identifier": ".//p[contains(@class, 'parsed-content')][starts-with(text(), 'UKSC/')]/text()",
-    "description": ".//span[contains(text(), 'Case summary')]/following-sibling::p[1]/text()",
-    "pdf_download": "//*[@id='judgment-pdf']/@href",
-    "judgment_details_link": "//*[@id='judgment-details-link']/@href",
+    "case_id": "(//p[@id='case-id'])[1]/text()",
+    "title": "//*[@id='case-title']//text()",
+    "case_status": "//*[@id='case-status']//text()",
+    "judgment_date": "//p[@id='judgment-date']/text()",
+    "judgment_pdf": "//*[@id='judgment-pdf']/@href",
+    "judgment_html_link": "//*[@id='judgment-details-link']/@href",
     "html_content": [
       "//h3[@id='judgment-details']/following-sibling::p"
     ]
   },
   "metadata_selectors": {
-    "case_id": "//p[@id='case-id']",
-    "neutral_citation": "//p[@id='neutral-citation-number']",
-    "judgment_date": "//p[@id='judgment-date']",
-    "issue": "//p[@id='issue']",
-    "facts": "//p[@id='facts']",
-    "appellants": "//p[starts-with(@id, 'appellant-')]",
-    "respondents": "//p[starts-with(@id, 'respondent-')]",
-    "justices": "(//*[@id='justices'])[1]/following-sibling::div[1]/div",
-    "hearing_start_dates": "//p[@id='hearing-start-date']",
-    "hearing_end_dates": "//p[@id='hearing-end-date']",
-    "pta_justices": "//*[@id='permission-to-appeal']/following::*[@id='justices'][1]/following-sibling::div[1]/div",
-    "pta_decision_date": "//p[@id='pta-decision-date']",
-    "pta_outcome": "//p[@id='pta-outcome']",
-    "press_summary_url": "//*[@id='press-summary-pdf']/@href",
+    "area_of_law": "//p[@id='area-of-law']/text()",
+    "neutral_citation": "//p[@id='neutral-citation-number']/text()",
+    "issue": "//p[@id='issue']/text()",
+    "facts": "//p[@id='facts']/text()",
+    "hearing_start_date": "//p[@id='hearing-start-date']/text()",
+    "hearing_end_date": "//p[@id='hearing-end-date']/text()",
+    "pta_decision_date": "//p[@id='pta-decision-date']/text()",
+    "pta_outcome": "//p[@id='pta-outcome']/text()",
+    "press_summary_pdf_url": "//*[@id='press-summary-pdf']/@href",
+    "press_summary_url": "//a[@id='press-summary-link'][starts-with(@href, '/cases/press-summary/')]/@href",
     "bailii_url": "//*[@id='judgment-on-bailii-link']/@href",
     "national_archives_url": "//*[@id='judgment-on-tna-link']/@href"
+  },
+  "metadata_list_selectors": {
+    "appellants": "//p[starts-with(@id, 'appellant-')]/text()",
+    "respondents": "//p[starts-with(@id, 'respondent-')]/text()",
+    "justices": "(//*[@id='justices'])[1]/following-sibling::div[1]/div//text()",
+    "pta_justices": "//*[@id='permission-to-appeal']/following::*[@id='justices'][1]/following-sibling::div[1]/div//text()"
+  },
+  "date_formats": {
+    "published": [
+      "%d %B %Y",
+      "%d/%m/%Y",
+      "%Y-%m-%d"
+    ]
   }
 }
